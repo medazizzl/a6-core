@@ -28,6 +28,7 @@ func New(cfg *config.Config, store *state.Store) *Server {
 func (s *Server) routes() {
 	s.mux.HandleFunc("/healthz", s.handleHealth)
 	s.mux.HandleFunc("/api/v1/info", s.handleInfo)
+	s.mux.HandleFunc("/api/v1/state", s.handleState)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
