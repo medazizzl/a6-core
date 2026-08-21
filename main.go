@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"a6core/internal/config"
+	"a6core/internal/server"
 	"a6core/internal/state"
 	"a6core/internal/version"
 )
@@ -35,12 +36,11 @@ func main() {
 	log.Printf("state: store opened successfully in %s", cfg.DataDir)
 
 	snap := store.Snapshot()
-	log.Printf("state: core_id=%s core_name=%q devices=%d shortcuts=%d servers=%d",
-		snap.CoreID, snap.CoreName, len(snap.Devices), len(snap.Shortcuts), len(snap.Servers))
+	addr := fmt.Sprintf(":%d", snap.Settings.Port)
 
-	if err := store.Save(); err != nil {
-		log.Fatalf("state: failed to save store: %v", err)
+	srv := server.New(cfg, store)
+	log.Printf("http: starting HTTP server on %s", addr)
+	if err := srv.ListenAndServe(addr); err != nil {
+		log.Fatalf("http: server failed: %v", err)
 	}
-	log.Println("state: save round-trip verified")
-	log.Println("Stage 3 scaffold: CLI flags and config loading implemented.")
 }
