@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,9 +11,10 @@ import (
 )
 
 type Server struct {
-	cfg   *config.Config
-	store *state.Store
-	mux   *http.ServeMux
+	cfg     *config.Config
+	store   *state.Store
+	mux     *http.ServeMux
+	httpSrv *http.Server
 }
 
 func New(cfg *config.Config, store *state.Store) *Server {
@@ -49,5 +51,16 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ListenAndServe(addr string) error {
-	return http.ListenAndServe(addr, s.mux)
+	s.httpSrv = &http.Server{
+		Addr:    addr,
+		Handler: s.mux,
+	}
+	return s.httpSrv.ListenAndServe()
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.httpSrv == nil {
+		return nil
+	}
+	return s.httpSrv.Shutdown(ctx)
 }

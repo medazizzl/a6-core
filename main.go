@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"a6core/internal/config"
 	"a6core/internal/server"
@@ -39,8 +44,33 @@ func main() {
 	addr := fmt.Sprintf(":%d", snap.Settings.Port)
 
 	srv := server.New(cfg, store)
-	log.Printf("http: starting HTTP server on %s", addr)
-	if err := srv.ListenAndServe(addr); err != nil {
-		log.Fatalf("http: server failed: %v", err)
+
+	go func() {
+		log.Printf("http: starting HTTP server on %s", addr)
+		if err := srv.ListenAndServe(addr); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("http: server failed: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	sig := <-quit
+	log.Printf("signal: received %v, initiating graceful shutdown", sig)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("http: graceful shutdown failed: %v", err)
+	} else {
+		log.Printf("http: server stopped cleanly")
 	}
+
+	if err := store.Save(); err != nil {
+		log.Printf("state: ERROR - failed to save state on shutdown: %v", err)
+		os.Exit(1)
+	}
+	log.Printf("state: saved state to disk")
+
+	log.Printf("A6 Core shutdown complete")
 }
