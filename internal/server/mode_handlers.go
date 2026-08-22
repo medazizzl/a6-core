@@ -7,6 +7,7 @@ import (
 
 	"a6core/internal/modes"
 	"a6core/internal/resources"
+	"a6core/internal/state"
 )
 
 type modeHandler struct {
@@ -14,8 +15,20 @@ type modeHandler struct {
 }
 
 type switchRequest struct {
-	Mode  string `json:"mode"`
-	Force bool   `json:"force"`
+	Target string `json:"target"`
+	Force  bool   `json:"force"`
+}
+
+type modesGetResponse struct {
+	Current       string   `json:"current"`
+	Available     []string `json:"available"`
+	Transitioning bool     `json:"transitioning"`
+}
+
+type modesPostResponse struct {
+	TransitionID string `json:"transition_id"`
+	From         string `json:"from"`
+	To           string `json:"to"`
 }
 
 func (h *modeHandler) handleModes(w http.ResponseWriter, r *http.Request) {
@@ -29,15 +42,21 @@ func (h *modeHandler) handleModes(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *modeHandler) handleGet(w http.ResponseWriter, r *http.Request) {
-	current := h.mgr.Current()
-	resp := map[string]interface{}{
-		"current":       current,
-		"available":     modes.AllModes,
-		"transitioning": false,
+func availableModeStrings() []string {
+	out := make([]string, 0, len(modes.AllModes))
+	for _, m := range modes.AllModes {
+		out = append(out, string(m))
 	}
+	return out
+}
+
+func (h *modeHandler) handleGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(modesGetResponse{
+		Current:       string(h.mgr.Current()),
+		Available:     availableModeStrings(),
+		Transitioning: false,
+	})
 }
 
 func (h *modeHandler) handlePost(w http.ResponseWriter, r *http.Request) {
@@ -47,13 +66,14 @@ func (h *modeHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	target := modes.Mode(req.Mode)
-	_, err := h.mgr.Switch(target, req.Force)
+	target := modes.Mode(req.Target)
+	from, err := h.mgr.Switch(target, req.Force)
 	if err != nil {
 		if errors.Is(err, modes.ErrInvalidMode) {
 			http.Error(w, "invalid mode", http.StatusUnprocessableEntity)
 			return
 		}
+
 		var blocked *resources.ErrBlocked
 		if errors.As(err, &blocked) {
 			w.Header().Set("Content-Type", "application/json")
@@ -64,9 +84,16 @@ func (h *modeHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	h.handleGet(w, r)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(modesPostResponse{
+		TransitionID: state.NewID(),
+		From:         string(from),
+		To:           string(target),
+	})
 }
