@@ -1,13 +1,14 @@
 {
   "core_id": "e3c747b0-de79-469c-b709-e46342ec1def",
   "core_name": "Project A6",
+  "mode": "server",
   "devices": [
     {
       "id": "87d89a99-d982-42b1-a278-83183aeeedc1",
       "name": "Test Device",
       "key_hash": "88fba0161afabe1a06ac107e022aa31b7dc9a15e74824aa49eda8f6ef7a6acd0",
       "paired_at": "2026-08-22T06:56:09.979241577Z",
-      "last_seen": "2026-08-22T06:57:34.535978165Z"
+      "last_seen": "2026-08-22T11:47:57.174841902Z"
     }
   ],
   "shortcuts": [],

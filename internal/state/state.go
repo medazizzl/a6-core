@@ -1,6 +1,3 @@
-// Package state implements A6 Core's persistent, disk-backed state:
-// paired devices, shortcuts, and the server registry, as defined in
-// the frozen A6 Core v1.0 spec, §13.
 package state
 
 import (
@@ -23,9 +20,15 @@ const (
 	backupFile   = "state.json.bak"
 )
 
+// defaultMode is used both for a brand-new install and as the
+// backward-compatible fallback for any state.json written before
+// Stage 8 added the Mode field (see readStateFile).
+const defaultMode = "tv"
+
 type State struct {
 	CoreID    string     `json:"core_id"`
 	CoreName  string     `json:"core_name"`
+	Mode      string     `json:"mode"`
 	Devices   []Device   `json:"devices"`
 	Shortcuts []Shortcut `json:"shortcuts"`
 	Servers   []Server   `json:"servers"`
@@ -182,7 +185,9 @@ func (s *Store) load() (State, error) {
 	ts := time.Now().Format("20060102-150405")
 	quarantine(primary, fmt.Sprintf("%s.corrupt-%s", primary, ts))
 	quarantine(backup, fmt.Sprintf("%s.corrupt-%s", backup, ts))
-	log.Printf("state: ERROR both state.json and state.json.bak were unreadable; starting fresh state")
+	log.Printf("state: ERROR both state.json and state.json.bak were unreadable; "+
+		"originals preserved with a .corrupt-%s suffix for inspection; "+
+		"starting from a fresh empty state so the appliance can still boot", ts)
 	return freshState(), nil
 }
 
@@ -194,6 +199,13 @@ func readStateFile(path string) (State, error) {
 	var st State
 	if err := json.Unmarshal(data, &st); err != nil {
 		return State{}, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	// Backward-compatible migration: any state.json written before
+	// Stage 8 added Mode won't have this field at all, which decodes
+	// to "" rather than erroring. "" is not a valid mode, so treat it
+	// as an implicit default rather than letting it propagate.
+	if st.Mode == "" {
+		st.Mode = defaultMode
 	}
 	return st, nil
 }
@@ -208,6 +220,7 @@ func freshState() State {
 	return State{
 		CoreID:    NewID(),
 		CoreName:  "Project A6",
+		Mode:      defaultMode,
 		Devices:   []Device{},
 		Shortcuts: []Shortcut{},
 		Servers:   []Server{},
@@ -243,11 +256,11 @@ func copyFileAtomic(src, dst string) error {
 func deepCopy(st State) State {
 	data, err := json.Marshal(st)
 	if err != nil {
-		panic(fmt.Sprintf("state: deepCopy marshal failed: %v", err))
+		panic(fmt.Sprintf("state: deepCopy marshal failed (should be unreachable): %v", err))
 	}
 	var out State
 	if err := json.Unmarshal(data, &out); err != nil {
-		panic(fmt.Sprintf("state: deepCopy unmarshal failed: %v", err))
+		panic(fmt.Sprintf("state: deepCopy unmarshal failed (should be unreachable): %v", err))
 	}
 	return out
 }
