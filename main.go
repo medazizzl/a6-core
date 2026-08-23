@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"a6core/internal/config"
 	"a6core/internal/modes"
 	"a6core/internal/server"
 	"a6core/internal/state"
@@ -16,14 +19,26 @@ import (
 )
 
 func main() {
-	log.Printf("A6 Core v%s starting...", version.String)
+	versionFlag := flag.Bool("version", false, "print version and exit")
+	configPath := flag.String("config", "", "path to a JSON config file (optional; defaults are used if omitted)")
+	flag.Parse()
 
-	dataDir := os.Getenv("A6_DATA_DIR")
-	if dataDir == "" {
-		dataDir = "./data"
+	// -version is handled before anything else starts — no state
+	// store, no server, no side effects at all, just the version.
+	if *versionFlag {
+		fmt.Println(version.String)
+		return
 	}
 
-	store, err := state.Open(dataDir)
+	log.Printf("A6 Core v%s starting...", version.String)
+
+	cfg, err := config.LoadConfig(*configPath)
+	if err != nil {
+		log.Fatalf("main: failed to load config: %v", err)
+	}
+	log.Printf("main: config loaded (env=%s, log_level=%s, data_dir=%s)", cfg.AppEnv, cfg.LogLevel, cfg.DataDir)
+
+	store, err := state.Open(cfg.DataDir)
 	if err != nil {
 		log.Fatalf("main: failed to open state store: %v", err)
 	}
@@ -40,6 +55,8 @@ func main() {
 
 	srv := server.New("7887", store, modeMgr, sysMgr)
 
+	// Stage 6: graceful shutdown. Run the server in a goroutine so
+	// this goroutine is free to wait on SIGINT/SIGTERM.
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- srv.Start()
