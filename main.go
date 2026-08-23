@@ -10,9 +10,11 @@ import (
 	"syscall"
 	"time"
 
+	"a6core/internal/apps"
 	"a6core/internal/config"
 	"a6core/internal/icons"
 	"a6core/internal/modes"
+	"a6core/internal/retro"
 	"a6core/internal/server"
 	"a6core/internal/shortcuts"
 	"a6core/internal/state"
@@ -53,8 +55,10 @@ func main() {
 
 	iconStore := icons.New(store)
 	scStore := shortcuts.New(store, iconStore)
+	retroStore := retro.New(cfg.DataDir)
+	appMgr := apps.NewManager(scStore, retroStore, nil, nil)
 
-	srv := server.New("7887", store, modeMgr, sysMgr, scStore, iconStore)
+	srv := server.New("7887", store, modeMgr, sysMgr, scStore, iconStore, appMgr, retroStore)
 
 	serverErr := make(chan error, 1)
 	go func() {
