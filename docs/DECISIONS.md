@@ -82,3 +82,79 @@ answer belongs here.
   passwordless SSH from the Windows desktop; file transfers use scp from local
   byte-exact copies (heredoc-over-shell pasting caused the original main.go
   truncation incident).
+
+## Stage 12 — Server Registry & Minecraft Lifecycle
+
+1. **No creation endpoint — hardcoded catalog.** The frozen spec defines
+   `GET /v1/servers`, `GET /v1/servers/{id}`, `POST .../start`, `POST .../stop`
+   — no create endpoint. Building CRUD with no population path would be
+   architecture theater. Server definitions live as a fixed list in
+   `internal/servers` (mirrors `internal/retro`'s console list). Currently
+   one entry: Minecraft (`minecraft`, type `minecraft`, "Survival World",
+   port 25565). Terraria/Factorio become one-line additions when actually
+   tested on this hardware.
+
+2. **Runtime status in-memory only.** Same reasoning as Stage 11's app
+   sessions: a persisted claim about a live external process misrepresents
+   reality after any unclean restart. Spec §12's recovery philosophy
+   applies identically here.
+
+3. **`Stop()` is async; `Start()` stays sync.** The frozen spec's
+   graceful-shutdown sequence (§10) is explicitly multi-phase with real
+   wait times — broadcast, 30s grace, send stop, poll up to 60s,
+   escalate only as last resort. That can't be a blocking HTTP call.
+   `Stop()` marks `"stopping"`, returns 202, runs sequence in background
+   goroutine. Durations are constructor-injectable (tests use ms, prod
+   uses spec defaults). `Start()` has no phased algorithm in the spec,
+   stays synchronous.
+
+4. **`force` on stop means "re-trigger sequence", not "kill".** On
+   `/v1/servers/{id}/stop`, `force` skips the `ErrStopInProgress` guard
+   and re-triggers the sequence — the broadcast/grace/poll/escalate
+   steps run identically either way. This differs from modes/system
+   where `force` gates proceeding past a blocking resource. Here the
+   resource IS the thing being stopped, so `force` has a narrower
+   meaning. `ErrStopInProgress` → 409 `stop_in_progress` (same pattern
+   as `busy_resource` everywhere else).
+
+5. **This is the stage that wires `apps.Manager.Blocking()` and
+   `servers.Manager.Blocking()` into something real.** Since Stage 8/9,
+   `modes.NewManager` and `system.NewManager` received `nil` checkers.
+   Now `main.go` constructs `appMgr` and `srvMgr` first, builds a
+   `combinedChecker` from both, and passes it to both managers. The
+   checker logic is real and tested — honest caveat: nothing sets a
+   player count above zero until Stage 15 provides RCON, so it returns
+   empty in practice today. The logic is real; the data source is still
+   a stub.
+
+6. **Lifecycle status values are explicit:** `stopped` (initial),
+   `starting` (transient), `running` (after Start succeeds),
+   `stopping` (after Stop returns, until grace+poll+escalate
+   completes). Failed Start leaves status `stopped` (honest). Failed
+   graceful stop leaves status `stopping` (honest ambiguity — never
+   falsely claims stopped).
+
+6. **Stop sequence implements spec §10 steps 2-7 exactly:**
+   2. Broadcast in-game warning (soft-failure — executor failure
+      doesn't abort shutdown)
+   3. Wait grace period (30s spec default)
+   4. Send graceful stop command
+   5. Poll `IsStopped` up to maxWait (60s spec default)
+   6. Escalate (second Stop call) ONLY if polling timed out — leave
+      status `stopping` (honest ambiguity, never falsely `stopped`)
+   7. Mark `stopped` on confirmed termination — clear players
+
+7. **In-progress guard prevents concurrent Stop sequences.**
+   `ErrStopInProgress` (409) if Stop called while one is in flight.
+   HTTP layer's `force=true` calls `ForceRestartStopSequence` which
+   bypasses the guard and starts a fresh sequence.
+
+8. **Concurrency safety:** `Manager` has its own `sync.RWMutex`
+   (separate from `state.Store`), background goroutine in `Stop`
+   properly cleans up `stopRunning` flag via `defer`. Race detector
+   verified (`go test -race`).
+
+Environment notes:
+- Real 30s grace period runs in production (test suite uses
+  injectable ms durations via constructor). Live verification confirmed
+  `stopping` → 32s wait → `stopped` on the real Acer.

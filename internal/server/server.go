@@ -13,6 +13,7 @@ import (
 	"a6core/internal/icons"
 	"a6core/internal/modes"
 	"a6core/internal/retro"
+	"a6core/internal/servers"
 	"a6core/internal/shortcuts"
 	"a6core/internal/state"
 	"a6core/internal/system"
@@ -25,7 +26,7 @@ type Server struct {
 	rateLimit  *auth.RateLimiter
 }
 
-func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system.Manager, scStore *shortcuts.Store, iconStore *icons.Store, appMgr *apps.Manager, retroStore *retro.Store) *Server {
+func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system.Manager, scStore *shortcuts.Store, iconStore *icons.Store, appMgr *apps.Manager, retroStore *retro.Store, srvMgr *servers.Manager) *Server {
 	s := &Server{
 		store:     store,
 		pairing:   auth.NewPairingManager(),
@@ -76,6 +77,12 @@ func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system
 	mux.Handle("GET /v1/retro/consoles", auth.RequireDevice(store, http.HandlerFunc(rtH.handleConsoles)))
 	mux.Handle("GET /v1/retro/games", auth.RequireDevice(store, http.HandlerFunc(rtH.handleGames)))
 	mux.Handle("POST /v1/retro/launch", auth.RequireDevice(store, http.HandlerFunc(rtH.handleLaunch)))
+
+	srvH := &serverHandler{mgr: srvMgr}
+	mux.Handle("GET /v1/servers", auth.RequireDevice(store, http.HandlerFunc(srvH.handleList)))
+	mux.Handle("GET /v1/servers/{id}", auth.RequireDevice(store, http.HandlerFunc(srvH.handleGet)))
+	mux.Handle("POST /v1/servers/{id}/start", auth.RequireDevice(store, http.HandlerFunc(srvH.handleStart)))
+	mux.Handle("POST /v1/servers/{id}/stop", auth.RequireDevice(store, http.HandlerFunc(srvH.handleStop)))
 
 	s.httpServer = &http.Server{
 		Addr:    ":" + port,
