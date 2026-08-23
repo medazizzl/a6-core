@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"a6core/internal/config"
+	"a6core/internal/icons"
 	"a6core/internal/modes"
 	"a6core/internal/server"
+	"a6core/internal/shortcuts"
 	"a6core/internal/state"
 	"a6core/internal/system"
 	"a6core/internal/version"
@@ -23,8 +25,6 @@ func main() {
 	configPath := flag.String("config", "", "path to a JSON config file (optional; defaults are used if omitted)")
 	flag.Parse()
 
-	// -version is handled before anything else starts — no state
-	// store, no server, no side effects at all, just the version.
 	if *versionFlag {
 		fmt.Println(version.String)
 		return
@@ -45,18 +45,17 @@ func main() {
 
 	modeMgr := modes.NewManager(store, nil, nil)
 
-	// Delegate system suspend to switching mode to "sleep".
 	sleepSetter := func(force bool) error {
 		_, err := modeMgr.Switch(modes.ModeSleep, force)
 		return err
 	}
-
 	sysMgr := system.NewManager(version.String, nil, nil, sleepSetter)
 
-	srv := server.New("7887", store, modeMgr, sysMgr)
+	iconStore := icons.New(store)
+	scStore := shortcuts.New(store, iconStore)
 
-	// Stage 6: graceful shutdown. Run the server in a goroutine so
-	// this goroutine is free to wait on SIGINT/SIGTERM.
+	srv := server.New("7887", store, modeMgr, sysMgr, scStore, iconStore)
+
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- srv.Start()
@@ -79,7 +78,6 @@ func main() {
 		if err := srv.Shutdown(ctx); err != nil {
 			log.Printf("main: WARNING graceful shutdown did not complete cleanly: %v", err)
 		}
-
 		if err := store.Save(); err != nil {
 			log.Fatalf("main: CRITICAL final state save failed: %v", err)
 		}

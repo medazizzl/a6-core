@@ -9,7 +9,9 @@ import (
 	"net/http"
 
 	"a6core/internal/auth"
+	"a6core/internal/icons"
 	"a6core/internal/modes"
+	"a6core/internal/shortcuts"
 	"a6core/internal/state"
 	"a6core/internal/system"
 )
@@ -21,7 +23,7 @@ type Server struct {
 	rateLimit  *auth.RateLimiter
 }
 
-func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system.Manager) *Server {
+func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system.Manager, scStore *shortcuts.Store, iconStore *icons.Store) *Server {
 	s := &Server{
 		store:     store,
 		pairing:   auth.NewPairingManager(),
@@ -51,6 +53,17 @@ func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system
 	mux.Handle("/v1/system/reboot", auth.RequireDevice(store, http.HandlerFunc(sh.handleReboot)))
 	mux.Handle("/v1/system/shutdown", auth.RequireDevice(store, http.HandlerFunc(sh.handleShutdown)))
 	mux.Handle("/v1/system/suspend", auth.RequireDevice(store, http.HandlerFunc(sh.handleSuspend)))
+
+	scH := &shortcutHandler{store: scStore}
+	mux.Handle("GET /v1/shortcuts", auth.RequireDevice(store, http.HandlerFunc(scH.handleList)))
+	mux.Handle("POST /v1/shortcuts", auth.RequireDevice(store, http.HandlerFunc(scH.handleCreate)))
+	mux.Handle("PUT /v1/shortcuts/{id}", auth.RequireDevice(store, http.HandlerFunc(scH.handleUpdate)))
+	mux.Handle("DELETE /v1/shortcuts/{id}", auth.RequireDevice(store, http.HandlerFunc(scH.handleDelete)))
+
+	icH := &iconHandler{store: iconStore}
+	mux.Handle("POST /v1/icons", auth.RequireDevice(store, http.HandlerFunc(icH.handleUpload)))
+	mux.Handle("GET /v1/icons/default", auth.RequireDevice(store, http.HandlerFunc(icH.handleGetDefault)))
+	mux.Handle("GET /v1/icons/{id}", auth.RequireDevice(store, http.HandlerFunc(icH.handleGet)))
 
 	s.httpServer = &http.Server{
 		Addr:    ":" + port,
