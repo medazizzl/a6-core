@@ -158,3 +158,60 @@ Environment notes:
 - Real 30s grace period runs in production (test suite uses
   injectable ms durations via constructor). Live verification confirmed
   `stopping` → 32s wait → `stopped` on the real Acer.
+
+## Stage 13 — WebSocket Event Stream
+
+1. **First non-stdlib dependency: github.com/coder/websocket.** WebSocket
+   framing (RFC 6455) is hard to hand-roll correctly; this library is
+   small, actively maintained, has no transitive deps, and uses
+   context.Context patterns. Precedent: gcc for -race is the
+   same category — a justified exception to the stdlib-only rule.
+
+2. **Heartbeat is application-level JSON ({event:" ping\} /
+ {event:\pong\}), not transport ping/pong.** Keeps heartbeat logic
+ testable without the WS library. Spec-explicit.
+
+3. **One envelope for all messages:** {event:\...\, data:{...}},
+ data omitted for ping/pong. Matches spec's connected example.
+
+4. **Slow client never blocks the hub.** Per-client buffered channel
+ (16 messages) with non-blocking enqueue — dropping one tick for
+ a slow client is fine; a frozen broadcast loop is not.
+
+5. **Auth extraction — single shared implementation.** ValidateDeviceKey
+ extracted from auth.middleware (Stage 7) and now called by both
+ REST middleware and WebSocket handshake. Auth tests (4/4) pass
+ unchanged — zero behavior change.
+
+6. **Events published from HTTP handlers, not business logic.** Each
+ handler publishes on success; business logic packages (modes,
+ apps, servers, auth) remain completely unaware of events.
+ No new cross-package dependencies.
+
+7. **device.paired/device.revoked broadcast to all clients.**
+ Security-wise fine: only paired devices can ever authenticate to
+ the WebSocket, so an unpaired device can never receive these.
+ Spec's own intent is notification to already-paired peers.
+
+8. **status.tick runs on its own 5s ticker in Hub**, independent of
+ heartbeat. StatusProvider closure in main.go closes over
+ modeMgr + telemetry.Sampler — telemetry never imported by
+ internal/events (stubbed seam pattern).
+
+9. **network field in StatusTick explicitly deferred** — needs a
+ small network reader in telemetry; deferred to a follow-up Wave 5
+ before Stage 13 called fully complete.
+
+10. **Background lifecycle: three goroutines (Hub.Run,
+ Hub.RunStatusTicks, telemetry.Sampler.Run) share ONE
+ context.Context (bgCtx), cancelled simultaneously with
+ HTTP server's graceful shutdown. No leaked goroutines on Ctrl+C.
+
+11. **servers.Manager.SetOnChange callback** — internal/servers stays
+ unaware of events; main.go wires hub.Publish through the
+ callback, keeping the event import out of internal/servers.
+
+Environment notes:
+- github.com/coder/websocket v1.8.15 added to go.mod (first
+ non-stdlib runtime dep).
+- gcc remains build-time only (for -race).
