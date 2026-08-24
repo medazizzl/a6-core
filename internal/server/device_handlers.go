@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"a6core/internal/events"
 	"a6core/internal/state"
 )
 
@@ -31,17 +32,17 @@ func (s *Server) handleDevicesList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleDeviceDelete revokes a paired device. The "is this the last
-// device" check happens INSIDE the store.Update closure, under the
-// same lock as the mutation — checking it beforehand against a
-// separate snapshot would leave a race where two concurrent deletes
-// could both see "not the last one" and jointly empty the list.
 func (s *Server) handleDeviceDelete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		writeJSONError(w, http.StatusBadRequest, "missing_id", "device id is required")
 		return
 	}
+
+	// Captured inside the closure before removal, so device.revoked
+	// can report a name — the entry is gone from st.Devices by the
+	// time Update returns successfully.
+	var revokedName string
 
 	var existed bool
 	err := s.store.Update(func(st *state.State) error {
@@ -59,6 +60,7 @@ func (s *Server) handleDeviceDelete(w http.ResponseWriter, r *http.Request) {
 		if len(st.Devices) <= 1 {
 			return errLastDevice
 		}
+		revokedName = st.Devices[idx].Name
 		st.Devices = append(st.Devices[:idx], st.Devices[idx+1:]...)
 		return nil
 	})
@@ -71,6 +73,10 @@ func (s *Server) handleDeviceDelete(w http.ResponseWriter, r *http.Request) {
 	case !existed:
 		writeJSONError(w, http.StatusNotFound, "device_not_found", "no device with that id")
 	default:
+		s.hub.Publish(events.Event{
+			Event: "device.revoked",
+			Data:  map[string]string{"device_id": id, "device_name": revokedName},
+		})
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

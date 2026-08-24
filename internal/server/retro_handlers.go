@@ -5,12 +5,14 @@ import (
 	"net/http"
 
 	"a6core/internal/apps"
+	"a6core/internal/events"
 	"a6core/internal/retro"
 )
 
 type retroHandler struct {
 	appMgr *apps.Manager
 	store  *retro.Store
+	hub    *events.Hub
 }
 
 func (h *retroHandler) handleConsoles(w http.ResponseWriter, r *http.Request) {
@@ -25,16 +27,16 @@ func (h *retroHandler) handleGames(w http.ResponseWriter, r *http.Request) {
 	}
 	games, err := h.store.Games(console)
 	if err != nil {
-		writeLaunchError(w, err) // reuses the shared mapping: unknown console -> 422, per clarification C
+		writeLaunchError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, games)
 }
 
 // handleLaunch is the second door onto apps.Manager.Launch — same
-// call, same writeLaunchError mapping as /v1/apps/launch. This
-// handler only accepts console/game_id and hardcodes TypeRetro,
-// rather than exposing the general launch shape a second time.
+// call, same writeLaunchError mapping, and (this is the piece an
+// earlier draft of this wave missed) the same app.launched publish
+// via the shared launchEventData helper as POST /v1/apps/launch.
 func (h *retroHandler) handleLaunch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Console string `json:"console"`
@@ -53,6 +55,9 @@ func (h *retroHandler) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		writeLaunchError(w, err)
 		return
 	}
+
+	h.hub.Publish(events.Event{Event: "app.launched", Data: launchEventData(session)})
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(launchResponse{AppSessionID: session.ID})

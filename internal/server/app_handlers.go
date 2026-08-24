@@ -6,12 +6,14 @@ import (
 	"net/http"
 
 	"a6core/internal/apps"
+	"a6core/internal/events"
 	"a6core/internal/retro"
 	"a6core/internal/shortcuts"
 )
 
 type appHandler struct {
 	mgr *apps.Manager
+	hub *events.Hub
 }
 
 type currentAppResponse struct {
@@ -35,6 +37,25 @@ func sessionToResponse(s *apps.Session) currentAppResponse {
 		GameID:     s.GameID,
 		StartedAt:  &started,
 	}
+}
+
+// launchEventData builds the app.launched event payload from a
+// session. Shared by BOTH POST /v1/apps/launch (below) and POST
+// /v1/retro/launch (retro_handlers.go) — extending Stage 11's "two
+// doors, one room" principle from the launch call itself to what
+// gets published about it, so the two entry points can't diverge.
+func launchEventData(s apps.Session) map[string]string {
+	data := map[string]string{"type": s.Type}
+	if s.ShortcutID != "" {
+		data["shortcut_id"] = s.ShortcutID
+	}
+	if s.Console != "" {
+		data["console"] = s.Console
+	}
+	if s.GameID != "" {
+		data["game_id"] = s.GameID
+	}
+	return data
 }
 
 func (h *appHandler) handleCurrent(w http.ResponseWriter, r *http.Request) {
@@ -68,22 +89,31 @@ func (h *appHandler) handleLaunch(w http.ResponseWriter, r *http.Request) {
 		writeLaunchError(w, err)
 		return
 	}
+
+	h.hub.Publish(events.Event{Event: "app.launched", Data: launchEventData(session)})
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(launchResponse{AppSessionID: session.ID})
 }
 
+// handleClose captures the session BEFORE calling Close(), since
+// Close() clears it. Close() is idempotent when nothing is running
+// (Stage 11 decision 3a) — the before != nil guard ensures
+// app.closed only fires for a session that genuinely existed, never
+// a phantom event for an already-idle close.
 func (h *appHandler) handleClose(w http.ResponseWriter, r *http.Request) {
+	before := h.mgr.Current()
 	if err := h.mgr.Close(); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "close_failed", err.Error())
 		return
 	}
+	if before != nil {
+		h.hub.Publish(events.Event{Event: "app.closed", Data: map[string]string{"type": before.Type}})
+	}
 	w.WriteHeader(http.StatusAccepted)
 }
 
-// writeLaunchError is the SINGLE error-mapping function used by both
-// /v1/apps/launch and /v1/retro/launch (retro_handlers.go below) —
-// two doors, one room, same furniture, per Stage 11 decision 1.
 func writeLaunchError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, retro.ErrUnknownConsole):

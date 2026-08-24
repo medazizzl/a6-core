@@ -108,6 +108,7 @@ type Manager struct {
 	gracePeriod time.Duration
 	maxWait     time.Duration
 	pollEvery   time.Duration
+	onChange    func(id string, status Status) // optional; nil is safe (see SetOnChange)
 }
 
 func NewManager(executor Executor, gracePeriod, maxWait time.Duration) *Manager {
@@ -222,6 +223,7 @@ func (m *Manager) Start(id string) (Server, error) {
 	}
 
 	m.setStatus(id, StatusRunning)
+	m.notify(id, StatusRunning)
 	return m.mustGet(id), nil
 }
 
@@ -257,6 +259,7 @@ func (m *Manager) Stop(id string) error {
 	current := toServer(d, rt)
 	m.mu.Unlock()
 
+	m.notify(id, StatusStopping)
 	go m.runStopSequence(id, current)
 	return nil
 }
@@ -303,6 +306,7 @@ func (m *Manager) runStopSequence(id string, srv Server) {
 				rt.players = nil
 			}
 			m.mu.Unlock()
+			m.notify(id, StatusStopped)
 			return
 		}
 		time.Sleep(m.pollEvery)
@@ -348,6 +352,27 @@ func (m *Manager) ForceRestartStopSequence(id string) error {
 	current := toServer(d, rt)
 	m.mu.Unlock()
 
+	m.notify(id, StatusStopping)
 	go m.runStopSequence(id, current)
 	return nil
+}
+
+// SetOnChange registers a callback invoked whenever a server's
+// status actually changes. Kept deliberately generic (id + Status
+// only, no dependency on internal/events at all) so this package
+// never needs to know events exist — main.go (Wave 4) wires the
+// real hub.Publish call through this hook.
+func (m *Manager) SetOnChange(fn func(id string, status Status)) {
+	m.mu.Lock()
+	m.onChange = fn
+	m.mu.Unlock()
+}
+
+func (m *Manager) notify(id string, status Status) {
+	m.mu.RLock()
+	fn := m.onChange
+	m.mu.RUnlock()
+	if fn != nil {
+		fn(id, status)
+	}
 }

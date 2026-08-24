@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"a6core/internal/events"
 	"a6core/internal/modes"
 	"a6core/internal/resources"
 	"a6core/internal/state"
@@ -12,6 +13,7 @@ import (
 
 type modeHandler struct {
 	mgr *modes.Manager
+	hub *events.Hub
 }
 
 type switchRequest struct {
@@ -65,7 +67,6 @@ func (h *modeHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-
 	target := modes.Mode(req.Target)
 	from, err := h.mgr.Switch(target, req.Force)
 	if err != nil {
@@ -73,7 +74,6 @@ func (h *modeHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid mode", http.StatusUnprocessableEntity)
 			return
 		}
-
 		var blocked *resources.ErrBlocked
 		if errors.As(err, &blocked) {
 			w.Header().Set("Content-Type", "application/json")
@@ -84,10 +84,17 @@ func (h *modeHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Only reached on a genuinely successful transition — both error
+	// paths above return before this point, so mode.changed can
+	// never fire for a switch that didn't actually happen.
+	h.hub.Publish(events.Event{
+		Event: "mode.changed",
+		Data:  map[string]string{"from": string(from), "to": string(target)},
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)

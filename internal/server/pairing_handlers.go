@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"a6core/internal/auth"
+	"a6core/internal/events"
 	"a6core/internal/state"
 )
 
@@ -16,9 +17,6 @@ type pairGenerateResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// handlePairGenerate creates a new pairing token. Registered behind
-// auth.RequireLocalhost in routes() — only the TV shell, running on
-// this same machine, can ever reach it (spec §5).
 func (s *Server) handlePairGenerate(w http.ResponseWriter, r *http.Request) {
 	token, expiresAt, err := s.pairing.Generate()
 	if err != nil {
@@ -40,10 +38,6 @@ type pairResponse struct {
 	APIVersion string `json:"api_version"`
 }
 
-// handlePair exchanges a valid, unexpired pairing token for a
-// permanent device key. This is the ONLY point in the whole API
-// where a raw device key is ever transmitted (spec §15) — never
-// stored, logged, or retrievable again after this response.
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	if !s.rateLimit.Allow(auth.ClientIP(r)) {
 		writeJSONError(w, http.StatusTooManyRequests, "rate_limited", "too many pairing attempts, try again shortly")
@@ -90,12 +84,18 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		// Deliberately do NOT return the raw key if persistence
-		// failed — never tell a phone "here's your key" for a
-		// device that wasn't actually saved.
+		// Deliberately no device.paired publish here either — same
+		// reasoning as not returning the raw key on this path:
+		// persistence failed, so nothing genuinely joined the
+		// paired-device list.
 		writeJSONError(w, http.StatusInternalServerError, "save_failed", "device could not be persisted, please retry pairing")
 		return
 	}
+
+	s.hub.Publish(events.Event{
+		Event: "device.paired",
+		Data:  map[string]string{"device_id": device.ID, "device_name": device.Name},
+	})
 
 	writeJSON(w, http.StatusOK, pairResponse{
 		DeviceID:   device.ID,
