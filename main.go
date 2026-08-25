@@ -12,6 +12,7 @@ import (
 
 	"a6core/internal/apps"
 	"a6core/internal/config"
+	"a6core/internal/dbusctl"
 	"a6core/internal/events"
 	"a6core/internal/icons"
 	"a6core/internal/modes"
@@ -25,6 +26,25 @@ import (
 	"a6core/internal/telemetry"
 	"a6core/internal/version"
 )
+
+// realExecutor uses dbusctl to perform real system actions via systemd-logind.
+type realExecutor struct {
+	client *dbusctl.Client
+}
+
+func (e *realExecutor) Reboot(ctx context.Context) error {
+	if err := e.client.Reboot(ctx); err != nil {
+		return fmt.Errorf("system: reboot failed: %w", err)
+	}
+	return nil
+}
+
+func (e *realExecutor) PowerOff(ctx context.Context) error {
+	if err := e.client.PowerOff(ctx); err != nil {
+		return fmt.Errorf("system: poweroff failed: %w", err)
+	}
+	return nil
+}
 
 func main() {
 	versionFlag := flag.Bool("version", false, "print version and exit")
@@ -55,6 +75,12 @@ func main() {
 	appMgr := apps.NewManager(scStore, retroStore, nil, nil)
 	srvMgr := servers.NewManager(servers.Executor{}, 0, 0)
 
+	// Create real system executor using dbusctl
+	dbusClient, err := dbusctl.Connect()
+	if err != nil {
+		log.Fatalf("main: failed to connect to D-Bus: %v", err)
+	}
+
 	combinedChecker := func() []resources.BlockingResource {
 		var out []resources.BlockingResource
 		out = append(out, appMgr.Blocking()...)
@@ -64,11 +90,7 @@ func main() {
 
 	modeMgr := modes.NewManager(store, combinedChecker, nil)
 
-	sleepSetter := func(force bool) error {
-		_, err := modeMgr.Switch(modes.ModeSleep, force)
-		return err
-	}
-	sysMgr := system.NewManager(version.String, combinedChecker, nil, sleepSetter)
+	sysMgr := system.NewManager(&realExecutor{client: dbusClient})
 
 	hub := events.NewHub()
 

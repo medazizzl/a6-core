@@ -1,163 +1,145 @@
+// Package system provides system action management for A6 Core.
+// It wraps ActionExecutor implementations and provides HTTP handlers.
 package system
 
 import (
-	"bufio"
-	"fmt"
-	"os"
-	"strings"
-	"syscall"
-
-	"a6core/internal/resources"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
 )
 
-type SystemInfo struct {
-	Hostname      string `json:"hostname"`
-	KernelVersion string `json:"kernel_version"`
-	A6CoreVersion string `json:"a6core_version"`
-	CPUModel      string `json:"cpu_model"`
-	RAMTotalMB    uint64 `json:"ram_total_mb"`
-	DiskTotalGB   uint64 `json:"disk_total_gb"`
+// ErrActionNotSupported is returned for actions not implemented on this hardware.
+var ErrActionNotSupported = errors.New("system: action not supported on this hardware")
+
+// ActionExecutor defines the interface for system actions.
+type ActionExecutor interface {
+	Reboot(ctx context.Context) error
+	PowerOff(ctx context.Context) error
 }
 
-type ActionExecutor func(action string) error
 
-func StubExecutor(action string) error { return nil }
 
+// Manager manages system actions and provides HTTP handlers.
 type Manager struct {
-	version     string
-	checker     resources.Checker
-	executor    ActionExecutor
-	sleepSetter func(force bool) error
+	executor ActionExecutor
 }
 
-func NewManager(version string, checker resources.Checker, executor ActionExecutor, sleepSetter func(force bool) error) *Manager {
-	if checker == nil {
-		checker = resources.NoBlocking
-	}
-	if executor == nil {
-		executor = StubExecutor
-	}
-	return &Manager{
-		version:     version,
-		checker:     checker,
-		executor:    executor,
-		sleepSetter: sleepSetter,
-	}
+// NewManager creates a new Manager with the given executor.
+func NewManager(executor ActionExecutor) *Manager {
+	return &Manager{executor: executor}
 }
 
-func (m *Manager) Info() (SystemInfo, error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = "unknown"
-	}
-
-	var uname syscall.Utsname
-	kernelVersion := "unknown"
-	if err := syscall.Uname(&uname); err == nil {
-		kernelVersion = unameToString(uname.Release[:])
-	}
-
-	cpuModel := readCPUModel()
-	ramTotal := readRAMTotalMB()
-	diskTotal := readDiskTotalGB()
-
-	return SystemInfo{
-		Hostname:      hostname,
-		KernelVersion: kernelVersion,
-		A6CoreVersion: m.version,
-		CPUModel:      cpuModel,
-		RAMTotalMB:    ramTotal,
-		DiskTotalGB:   diskTotal,
+// Info returns system information.
+func (m *Manager) Info() (map[string]any, error) {
+	return map[string]any{
+		"reboot_supported":  true,
+		"poweroff_supported": true,
+		"suspend_supported": false,
 	}, nil
 }
 
+// Reboot triggers a system reboot.
 func (m *Manager) Reboot(force bool) error {
-	return m.action("reboot", force)
+	ctx := context.Background()
+	return m.executor.Reboot(ctx)
 }
 
-func (m *Manager) Shutdown(force bool) error {
-	return m.action("shutdown", force)
+// PowerOff triggers a system shutdown.
+func (m *Manager) PowerOff(force bool) error {
+	ctx := context.Background()
+	return m.executor.PowerOff(ctx)
 }
 
+// Suspend is not supported on this hardware.
 func (m *Manager) Suspend(force bool) error {
-	if m.sleepSetter != nil {
-		if err := m.sleepSetter(force); err != nil {
-			return err
-		}
-	}
-	return m.action("suspend", force)
+	return ErrActionNotSupported
 }
 
-func (m *Manager) action(name string, force bool) error {
-	if !force {
-		if blocking := m.checker(); len(blocking) > 0 {
-			return &resources.ErrBlocked{Blocking: blocking}
-		}
-	}
-	if err := m.executor(name); err != nil {
-		return fmt.Errorf("system: %s failed: %w", name, err)
-	}
-	return nil
+// Handler returns the HTTP handlers for system routes.
+type Handler struct {
+	mgr *Manager
 }
 
-func unameToString(raw []int8) string {
-	buf := make([]byte, 0, len(raw))
-	for _, b := range raw {
-		if b == 0 {
-			break
-		}
-		buf = append(buf, byte(b))
-	}
-	return string(buf)
+func NewHandler(mgr *Manager) *Handler {
+	return &Handler{mgr: mgr}
 }
 
-func readCPUModel() string {
-	f, err := os.Open("/proc/cpuinfo")
+func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	info, err := h.mgr.Info()
 	if err != nil {
-		return "unknown"
+		writeJSONError(w, http.StatusInternalServerError, "info_failed", err.Error())
+		return
 	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "model name") || strings.HasPrefix(line, "Processor") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				return strings.TrimSpace(parts[1])
-			}
-		}
-	}
-	return "unknown"
+	writeJSON(w, http.StatusOK, info)
 }
 
-func readRAMTotalMB() uint64 {
-	f, err := os.Open("/proc/meminfo")
+type forceRequest struct {
+	Force bool `json:"force,omitempty"`
+}
+
+func (h *Handler) handleReboot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req forceRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	err := h.mgr.Reboot(req.Force)
 	if err != nil {
-		return 0
+		writeJSONError(w, http.StatusInternalServerError, "reboot_failed", err.Error())
+		return
 	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "MemTotal:") {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				var kb uint64
-				fmt.Sscanf(fields[1], "%d", &kb)
-				return kb / 1024
-			}
-		}
-	}
-	return 0
+	w.WriteHeader(http.StatusAccepted)
 }
 
-func readDiskTotalGB() uint64 {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs("/", &stat); err != nil {
-		return 0
+func (h *Handler) handleShutdown(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
 	}
-	totalBytes := stat.Blocks * uint64(stat.Bsize)
-	return totalBytes / (1024 * 1024 * 1024)
+	var req forceRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	err := h.mgr.PowerOff(req.Force)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "shutdown_failed", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (h *Handler) handleSuspend(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req forceRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	err := h.mgr.Suspend(req.Force)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "not_supported", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// writeJSON writes a JSON response.
+func writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
+}
+
+// writeJSONError writes a JSON error response.
+func writeJSONError(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error":   code,
+		"message": message,
+	})
 }

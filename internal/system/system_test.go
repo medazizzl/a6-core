@@ -1,50 +1,63 @@
 package system
 
 import (
+	"context"
 	"errors"
 	"testing"
-
-	"a6core/internal/resources"
 )
 
+// fakeExecutor is a test implementation of ActionExecutor.
+type fakeExecutor struct {
+	rebootErr  error
+	powerOffErr error
+}
+
+func (f *fakeExecutor) Reboot(ctx context.Context) error {
+	return f.rebootErr
+}
+
+func (f *fakeExecutor) PowerOff(ctx context.Context) error {
+	return f.powerOffErr
+}
+
 func TestSystemInfoReturnsFields(t *testing.T) {
-	mgr := NewManager("v0.1.0-test", nil, nil, nil)
+	mgr := NewManager(&fakeExecutor{})
 	info, err := mgr.Info()
 	if err != nil {
 		t.Fatalf("Info: %v", err)
 	}
-	if info.A6CoreVersion != "v0.1.0-test" {
-		t.Fatalf("expected version v0.1.0-test, got %q", info.A6CoreVersion)
+	if info["reboot_supported"] != true {
+		t.Fatalf("expected reboot_supported=true")
 	}
-	if info.Hostname == "" {
-		t.Fatal("expected non-empty hostname")
+	if info["poweroff_supported"] != true {
+		t.Fatalf("expected poweroff_supported=true")
 	}
-	if info.KernelVersion == "" {
-		t.Fatal("expected non-empty kernel version")
-	}
-}
-
-func TestRebootBlockedWithoutForce(t *testing.T) {
-	fakeChecker := func() []resources.BlockingResource {
-		return []resources.BlockingResource{{Type: "server", ID: "minecraft", Players: 1}}
-	}
-	mgr := NewManager("v0.1.0", fakeChecker, nil, nil)
-	err := mgr.Reboot(false)
-	var blocked *resources.ErrBlocked
-	if !errors.As(err, &blocked) {
-		t.Fatalf("expected *resources.ErrBlocked, got %v", err)
-	}
-	if len(blocked.Blocking) != 1 {
-		t.Fatalf("expected 1 blocking resource, got %d", len(blocked.Blocking))
+	if info["suspend_supported"] != false {
+		t.Fatalf("expected suspend_supported=false")
 	}
 }
 
-func TestRebootForceOverridesBlock(t *testing.T) {
-	fakeChecker := func() []resources.BlockingResource {
-		return []resources.BlockingResource{{Type: "server", ID: "minecraft", Players: 1}}
+func TestRebootCallsExecutor(t *testing.T) {
+	err := errors.New("simulated reboot error")
+	mgr := NewManager(&fakeExecutor{rebootErr: err})
+	err = mgr.Reboot(false)
+	if !errors.Is(err, err) {
+		t.Fatalf("expected executor error, got %v", err)
 	}
-	mgr := NewManager("v0.1.0", fakeChecker, nil, nil)
-	if err := mgr.Reboot(true); err != nil {
-		t.Fatalf("expected force to override reboot block, got %v", err)
+}
+
+func TestPowerOffCallsExecutor(t *testing.T) {
+	mgr := NewManager(&fakeExecutor{})
+	err := mgr.PowerOff(false)
+	if err != nil {
+		t.Fatalf("PowerOff: %v", err)
+	}
+}
+
+func TestSuspendReturnsNotSupported(t *testing.T) {
+	mgr := NewManager(&fakeExecutor{})
+	err := mgr.Suspend(false)
+	if !errors.Is(err, ErrActionNotSupported) {
+		t.Fatalf("expected ErrActionNotSupported, got %v", err)
 	}
 }

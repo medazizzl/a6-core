@@ -38,7 +38,7 @@ func (h *systemHandler) handleReboot(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *systemHandler) handleShutdown(w http.ResponseWriter, r *http.Request) {
-	h.handleAction(w, r, h.sysMgr.Shutdown)
+	h.handleAction(w, r, h.sysMgr.PowerOff)
 }
 
 func (h *systemHandler) handleSuspend(w http.ResponseWriter, r *http.Request) {
