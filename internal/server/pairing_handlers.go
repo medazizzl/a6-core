@@ -94,6 +94,17 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 
 	var coreName string
 	err = s.store.Update(func(st *state.State) error {
+		// The very first device ever paired automatically becomes
+		// primary — there's no existing primary yet to grant that role,
+		// and the appliance needs at least one device able to
+		// reboot/shut it down from day one. Checked inside the locked
+		// Update closure so two simultaneous first-pairings can't both
+		// end up primary. Every device paired after this defaults to
+		// guest; an existing primary has to explicitly promote them
+		// (see handleDevicePromote) — additive only, no demotion yet.
+		if len(st.Devices) == 0 {
+			device.IsPrimary = true
+		}
 		st.Devices = append(st.Devices, device)
 		coreName = st.CoreName
 		return nil

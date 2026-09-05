@@ -51,14 +51,15 @@ func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system
 	mux.Handle("/v1/state", auth.RequireDevice(store, http.HandlerFunc(s.handleState)))
 	mux.Handle("GET /v1/devices", auth.RequireDevice(store, http.HandlerFunc(s.handleDevicesList)))
 	mux.Handle("DELETE /v1/devices/{id}", auth.RequireDevice(store, http.HandlerFunc(s.handleDeviceDelete)))
+	mux.Handle("POST /v1/devices/{id}/promote", auth.RequireDevice(store, auth.RequirePrimary(http.HandlerFunc(s.handleDevicePromote))))
 
 	mh := &modeHandler{mgr: modeMgr, hub: hub}
 	mux.Handle("/v1/modes", auth.RequireDevice(store, http.HandlerFunc(mh.handleModes)))
 
 	sh := &systemHandler{sysMgr: sysMgr}
 	mux.Handle("GET /v1/system/info", auth.RequireDevice(store, http.HandlerFunc(sh.handleInfo)))
-	mux.Handle("/v1/system/reboot", auth.RequireDevice(store, http.HandlerFunc(sh.handleReboot)))
-	mux.Handle("/v1/system/shutdown", auth.RequireDevice(store, http.HandlerFunc(sh.handleShutdown)))
+	mux.Handle("/v1/system/reboot", auth.RequireDevice(store, auth.RequirePrimary(http.HandlerFunc(sh.handleReboot))))
+	mux.Handle("/v1/system/shutdown", auth.RequireDevice(store, auth.RequirePrimary(http.HandlerFunc(sh.handleShutdown))))
 
 	scH := &shortcutHandler{store: scStore}
 	mux.Handle("GET /v1/shortcuts", auth.RequireDevice(store, http.HandlerFunc(scH.handleList)))

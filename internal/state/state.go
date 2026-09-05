@@ -51,6 +51,7 @@ type Device struct {
 	PairedAt   time.Time `json:"paired_at"`
 	LastSeen   time.Time `json:"last_seen"`
 	DeviceType string    `json:"device_type"`
+	IsPrimary  bool      `json:"is_primary"`
 }
 
 type Shortcut struct {
@@ -225,6 +226,31 @@ func readStateFile(path string) (State, error) {
 	for i := range st.Devices {
 		if st.Devices[i].DeviceType == "" {
 			st.Devices[i].DeviceType = DeviceTypePhone
+		}
+	}
+	// Backward-compatible migration: any state.json written before
+	// Stage 16 added IsPrimary decodes every device to false. A
+	// paired-but-primary-less appliance is an invalid state (nobody
+	// could reboot/shut it down), so if at least one device exists and
+	// none is marked primary, auto-promote whichever was paired
+	// earliest — the same "first device wins" rule new pairings get in
+	// handlePair, applied retroactively.
+	if len(st.Devices) > 0 {
+		hasPrimary := false
+		for i := range st.Devices {
+			if st.Devices[i].IsPrimary {
+				hasPrimary = true
+				break
+			}
+		}
+		if !hasPrimary {
+			earliest := 0
+			for i := range st.Devices {
+				if st.Devices[i].PairedAt.Before(st.Devices[earliest].PairedAt) {
+					earliest = i
+				}
+			}
+			st.Devices[earliest].IsPrimary = true
 		}
 	}
 	return st, nil

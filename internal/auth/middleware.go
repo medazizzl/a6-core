@@ -102,6 +102,25 @@ func RequireDevice(store *state.Store, next http.Handler) http.Handler {
 	})
 }
 
+// RequirePrimary gates an action to primary devices only. It must be
+// nested INSIDE RequireDevice (i.e. RequireDevice(store,
+// RequirePrimary(handler))) so a device is already in context by the
+// time this runs — it does not itself authenticate anything. This is
+// the server-side enforcement Stage 16 requires: a guest device
+// sending a raw, hand-crafted request straight to a gated endpoint
+// (bypassing any app UI entirely) gets rejected here regardless of
+// what the client claims or how the request was made.
+func RequirePrimary(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		device, ok := DeviceFromContext(r.Context())
+		if !ok || !device.IsPrimary {
+			writeAuthError(w, http.StatusForbidden, "primary_required", "this action requires a primary device")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func RequireLocalhost(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := net.ParseIP(ClientIP(r))
