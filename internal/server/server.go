@@ -12,6 +12,7 @@ import (
 	"a6core/internal/auth"
 	"a6core/internal/events"
 	"a6core/internal/icons"
+	"a6core/internal/input"
 	"a6core/internal/modes"
 	"a6core/internal/retro"
 	"a6core/internal/servers"
@@ -28,7 +29,7 @@ type Server struct {
 	hub        *events.Hub
 }
 
-func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system.Manager, scStore *shortcuts.Store, iconStore *icons.Store, appMgr *apps.Manager, retroStore *retro.Store, srvMgr *servers.Manager, hub *events.Hub) *Server {
+func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system.Manager, scStore *shortcuts.Store, iconStore *icons.Store, appMgr *apps.Manager, retroStore *retro.Store, srvMgr *servers.Manager, hub *events.Hub, inputMgr *input.Manager) *Server {
 	s := &Server{
 		store:     store,
 		pairing:   auth.NewPairingManager(),
@@ -55,10 +56,9 @@ func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system
 	mux.Handle("/v1/modes", auth.RequireDevice(store, http.HandlerFunc(mh.handleModes)))
 
 	sh := &systemHandler{sysMgr: sysMgr}
-	mux.Handle("/v1/system/info", auth.RequireDevice(store, http.HandlerFunc(sh.handleInfo)))
+	mux.Handle("GET /v1/system/info", auth.RequireDevice(store, http.HandlerFunc(sh.handleInfo)))
 	mux.Handle("/v1/system/reboot", auth.RequireDevice(store, http.HandlerFunc(sh.handleReboot)))
 	mux.Handle("/v1/system/shutdown", auth.RequireDevice(store, http.HandlerFunc(sh.handleShutdown)))
-	mux.Handle("/v1/system/suspend", auth.RequireDevice(store, http.HandlerFunc(sh.handleSuspend)))
 
 	scH := &shortcutHandler{store: scStore}
 	mux.Handle("GET /v1/shortcuts", auth.RequireDevice(store, http.HandlerFunc(scH.handleList)))
@@ -88,6 +88,10 @@ func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system
 	mux.Handle("POST /v1/servers/{id}/stop", auth.RequireDevice(store, http.HandlerFunc(srvH.handleStop)))
 
 	mux.Handle("GET /v1/events", events.Handler(hub, func(key string) (state.Device, bool) {
+		return auth.ValidateDeviceKey(store, key)
+	}))
+
+	mux.Handle("GET /v1/input", input.Handler(inputMgr, func(key string) (state.Device, bool) {
 		return auth.ValidateDeviceKey(store, key)
 	}))
 

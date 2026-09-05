@@ -38,6 +38,20 @@ type pairResponse struct {
 	APIVersion string `json:"api_version"`
 }
 
+// deviceTypeForRequest derives whether a pairing request is coming
+// from the shell itself (running locally, as Wave 3's self-pairing
+// does) or from an external phone, using the same loopback check
+// RequireLocalhost enforces elsewhere. This is intentionally never
+// something the client can specify in the request body — device_type
+// must be exactly as trustworthy as RequireLocalhost already is, or
+// not set at all.
+func deviceTypeForRequest(r *http.Request) string {
+	if auth.IsLocalRequest(r) {
+		return state.DeviceTypeShell
+	}
+	return state.DeviceTypePhone
+}
+
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	if !s.rateLimit.Allow(auth.ClientIP(r)) {
 		writeJSONError(w, http.StatusTooManyRequests, "rate_limited", "too many pairing attempts, try again shortly")
@@ -70,11 +84,12 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	}
 
 	device := state.Device{
-		ID:       state.NewID(),
-		Name:     deviceName,
-		KeyHash:  auth.HashDeviceKey(rawKey),
-		PairedAt: time.Now(),
-		LastSeen: time.Now(),
+		ID:         state.NewID(),
+		Name:       deviceName,
+		KeyHash:    auth.HashDeviceKey(rawKey),
+		DeviceType: deviceTypeForRequest(r),
+		PairedAt:   time.Now(),
+		LastSeen:   time.Now(),
 	}
 
 	var coreName string

@@ -9,13 +9,12 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"net/url"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/coder/websocket"
 
+	"a6core/internal/auth"
 	"a6core/internal/state"
 )
 
@@ -171,21 +170,6 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 }
 
-// extractKey implements the frozen spec's precedence: Authorization
-// header preferred, ?token= query param as a fallback for clients
-// that can't set headers on the WS handshake.
-func extractKey(r *http.Request) string {
-	const prefix = "Bearer "
-	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, prefix) {
-		return strings.TrimPrefix(h, prefix)
-	}
-	q, err := url.ParseQuery(r.URL.RawQuery)
-	if err != nil {
-		return ""
-	}
-	return q.Get("token")
-}
-
 // Handler returns the GET /v1/events HTTP handler. Note: Accept's
 // default same-origin check only applies when a request carries an
 // Origin header at all — a native mobile client or a plain Go
@@ -193,7 +177,7 @@ func extractKey(r *http.Request) string {
 // so this needs no special options for this project's real clients.
 func Handler(hub *Hub, validate Validator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		key := extractKey(r)
+		key := auth.ExtractDeviceKey(r)
 		device, ok := validate(key)
 		if !ok {
 			http.Error(w, `{"error":"invalid_token","message":"device key not recognized or revoked"}`, http.StatusUnauthorized)

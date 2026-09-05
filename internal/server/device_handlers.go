@@ -12,10 +12,11 @@ import (
 var errLastDevice = errors.New("cannot remove the last remaining paired device")
 
 type deviceResponse struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	PairedAt string `json:"paired_at"`
-	LastSeen string `json:"last_seen"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	DeviceType string `json:"device_type"`
+	PairedAt   string `json:"paired_at"`
+	LastSeen   string `json:"last_seen"`
 }
 
 func (s *Server) handleDevicesList(w http.ResponseWriter, r *http.Request) {
@@ -23,10 +24,11 @@ func (s *Server) handleDevicesList(w http.ResponseWriter, r *http.Request) {
 	out := make([]deviceResponse, 0, len(snap.Devices))
 	for _, d := range snap.Devices {
 		out = append(out, deviceResponse{
-			ID:       d.ID,
-			Name:     d.Name,
-			PairedAt: d.PairedAt.Format(time.RFC3339),
-			LastSeen: d.LastSeen.Format(time.RFC3339),
+			ID:         d.ID,
+			Name:       d.Name,
+			DeviceType: d.DeviceType,
+			PairedAt:   d.PairedAt.Format(time.RFC3339),
+			LastSeen:   d.LastSeen.Format(time.RFC3339),
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

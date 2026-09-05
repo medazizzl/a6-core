@@ -8,7 +8,7 @@ import (
 
 // fakeExecutor is a test implementation of ActionExecutor.
 type fakeExecutor struct {
-	rebootErr  error
+	rebootErr   error
 	powerOffErr error
 }
 
@@ -51,13 +51,5 @@ func TestPowerOffCallsExecutor(t *testing.T) {
 	err := mgr.PowerOff(false)
 	if err != nil {
 		t.Fatalf("PowerOff: %v", err)
-	}
-}
-
-func TestSuspendReturnsNotSupported(t *testing.T) {
-	mgr := NewManager(&fakeExecutor{})
-	err := mgr.Suspend(false)
-	if !errors.Is(err, ErrActionNotSupported) {
-		t.Fatalf("expected ErrActionNotSupported, got %v", err)
 	}
 }

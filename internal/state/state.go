@@ -25,6 +25,15 @@ const (
 // Stage 8 added the Mode field (see readStateFile).
 const defaultMode = "tv"
 
+// Device type constants. DeviceType is set exactly once, server-side,
+// at pairing time (see server.deviceTypeForRequest) and is never
+// accepted as client input — see the Stage 17 blueprint's device_type
+// review note.
+const (
+	DeviceTypePhone = "phone"
+	DeviceTypeShell = "shell"
+)
+
 type State struct {
 	CoreID    string     `json:"core_id"`
 	CoreName  string     `json:"core_name"`
@@ -36,11 +45,12 @@ type State struct {
 }
 
 type Device struct {
-	ID       string    `json:"id"`
-	Name     string    `json:"name"`
-	KeyHash  string    `json:"key_hash"`
-	PairedAt time.Time `json:"paired_at"`
-	LastSeen time.Time `json:"last_seen"`
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	KeyHash    string    `json:"key_hash"`
+	PairedAt   time.Time `json:"paired_at"`
+	LastSeen   time.Time `json:"last_seen"`
+	DeviceType string    `json:"device_type"`
 }
 
 type Shortcut struct {
@@ -206,6 +216,16 @@ func readStateFile(path string) (State, error) {
 	// as an implicit default rather than letting it propagate.
 	if st.Mode == "" {
 		st.Mode = defaultMode
+	}
+	// Backward-compatible migration: any device paired before Stage 17
+	// Wave 4 added DeviceType won't have this field either, which
+	// decodes to "". Every device paired before this field existed was,
+	// in practice, a phone — the shell didn't exist yet — so treat ""
+	// as an implicit "phone" default, the same reasoning as Mode above.
+	for i := range st.Devices {
+		if st.Devices[i].DeviceType == "" {
+			st.Devices[i].DeviceType = DeviceTypePhone
+		}
 	}
 	return st, nil
 }

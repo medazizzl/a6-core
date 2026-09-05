@@ -5,20 +5,14 @@ package system
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 )
-
-// ErrActionNotSupported is returned for actions not implemented on this hardware.
-var ErrActionNotSupported = errors.New("system: action not supported on this hardware")
 
 // ActionExecutor defines the interface for system actions.
 type ActionExecutor interface {
 	Reboot(ctx context.Context) error
 	PowerOff(ctx context.Context) error
 }
-
-
 
 // Manager manages system actions and provides HTTP handlers.
 type Manager struct {
@@ -33,9 +27,9 @@ func NewManager(executor ActionExecutor) *Manager {
 // Info returns system information.
 func (m *Manager) Info() (map[string]any, error) {
 	return map[string]any{
-		"reboot_supported":  true,
+		"reboot_supported":   true,
 		"poweroff_supported": true,
-		"suspend_supported": false,
+		"suspend_supported":  false,
 	}, nil
 }
 
@@ -49,11 +43,6 @@ func (m *Manager) Reboot(force bool) error {
 func (m *Manager) PowerOff(force bool) error {
 	ctx := context.Background()
 	return m.executor.PowerOff(ctx)
-}
-
-// Suspend is not supported on this hardware.
-func (m *Manager) Suspend(force bool) error {
-	return ErrActionNotSupported
 }
 
 // Handler returns the HTTP handlers for system routes.
@@ -107,21 +96,6 @@ func (h *Handler) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	err := h.mgr.PowerOff(req.Force)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "shutdown_failed", err.Error())
-		return
-	}
-	w.WriteHeader(http.StatusAccepted)
-}
-
-func (h *Handler) handleSuspend(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req forceRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	err := h.mgr.Suspend(req.Force)
-	if err != nil {
-		writeJSONError(w, http.StatusBadRequest, "not_supported", err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)

@@ -15,6 +15,8 @@ import (
 	"a6core/internal/dbusctl"
 	"a6core/internal/events"
 	"a6core/internal/icons"
+	"a6core/internal/input"
+	"a6core/internal/inputbridge"
 	"a6core/internal/modes"
 	"a6core/internal/resources"
 	"a6core/internal/retro"
@@ -81,6 +83,18 @@ func main() {
 		log.Fatalf("main: failed to connect to D-Bus: %v", err)
 	}
 
+	// Open the real virtual input device (Stage 17 Wave 1/5). Failure
+	// here is fatal and unretried on purpose — see inputbridge.Open's
+	// own docs: a hardware failure at this exact point needs to be
+	// loud and diagnosable, not papered over with a fallback.
+	inputDevice, err := inputbridge.Open()
+	if err != nil {
+		log.Fatalf("main: failed to open virtual input device: %v", err)
+	}
+	defer inputDevice.Close()
+
+	inputMgr := input.NewManager(inputDevice)
+
 	combinedChecker := func() []resources.BlockingResource {
 		var out []resources.BlockingResource
 		out = append(out, appMgr.Blocking()...)
@@ -142,7 +156,7 @@ func main() {
 		return tick
 	}
 
-	srv := server.New("7887", store, modeMgr, sysMgr, scStore, iconStore, appMgr, retroStore, srvMgr, hub)
+	srv := server.New("7887", store, modeMgr, sysMgr, scStore, iconStore, appMgr, retroStore, srvMgr, hub, inputMgr)
 
 	// bgCtx governs every background goroutine started below — all
 	// three are cancelled together, at the same moment the HTTP

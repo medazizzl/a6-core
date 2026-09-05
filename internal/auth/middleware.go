@@ -1,3 +1,4 @@
+// Package auth implements authentication and authorization for A6 Core.
 package auth
 
 import (
@@ -63,6 +64,21 @@ func ValidateDeviceKey(store *state.Store, key string) (state.Device, bool) {
 		}
 	}
 	return *matched, true
+}
+
+// ExtractDeviceKey pulls a device key from a request using the same
+// precedence the frozen spec describes for WebSocket auth (§7):
+// Authorization: Bearer header preferred, ?token= query parameter as
+// a fallback for clients that can't set headers on a WebSocket
+// handshake. Shared by both /v1/events and /v1/input (Stage 17) so
+// the extraction logic can never drift between the two — the same
+// reasoning that already put ValidateDeviceKey here in Stage 13.
+func ExtractDeviceKey(r *http.Request) string {
+	const prefix = "Bearer "
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, prefix) {
+		return strings.TrimPrefix(h, prefix)
+	}
+	return r.URL.Query().Get("token")
 }
 
 func RequireDevice(store *state.Store, next http.Handler) http.Handler {
