@@ -50,6 +50,7 @@ func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system
 	mux.Handle("GET /v1/info", auth.RequireDevice(store, http.HandlerFunc(s.handleInfo)))
 	mux.Handle("/v1/state", auth.RequireDevice(store, http.HandlerFunc(s.handleState)))
 	mux.Handle("GET /v1/devices", auth.RequireDevice(store, http.HandlerFunc(s.handleDevicesList)))
+	mux.Handle("GET /v1/me", auth.RequireDevice(store, http.HandlerFunc(s.handleMe)))
 	mux.Handle("DELETE /v1/devices/{id}", auth.RequireDevice(store, http.HandlerFunc(s.handleDeviceDelete)))
 	mux.Handle("POST /v1/devices/{id}/promote", auth.RequireDevice(store, auth.RequirePrimary(http.HandlerFunc(s.handleDevicePromote))))
 

@@ -153,6 +153,10 @@ func main() {
 		if tempC, ok := telemetry.Temperature(); ok {
 			tick.TemperatureC = tempC
 		}
+		if ip, iface, ok := telemetry.LocalNetwork(); ok {
+			tick.NetworkIP = ip
+			tick.NetworkInterface = iface
+		}
 		return tick
 	}
 

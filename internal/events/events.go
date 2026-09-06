@@ -252,22 +252,26 @@ func writeLoop(c *Client) {
 // stubbed-seam pattern as every other stubbed-seam in this project.
 type StatusProvider func() StatusTick
 
-// StatusTick matches the frozen spec's Status schema (§8), minus
-// `network` — a known, explicit gap, not an oversight (see Wave 3
-// design notes). Fields telemetry marks "not ready" or "unknown"
+// StatusTick matches the frozen spec's Status schema (§8). Network
+// was originally left out as a known, explicit gap (see Wave 3
+// design notes) — closed here: NetworkIP/NetworkInterface, both
+// omitted via omitempty on a machine with no route right now (Wi-Fi
+// and Ethernet both down) rather than sent as a misleading empty
+// string. Fields telemetry marks "not ready" or "unknown"
 // (cpu_percent before two samples exist, temperature_c on hardware
-// with no confirmed sensor) are omitted via omitempty rather than
-// sent as a misleading zero.
+// with no confirmed sensor) are handled the same way.
 type StatusTick struct {
-	Mode          string  `json:"mode"`
-	UptimeSeconds uint64  `json:"uptime_seconds"`
-	CPUPercent    float64 `json:"cpu_percent,omitempty"`
-	RAMUsedMB     uint64  `json:"ram_used_mb"`
-	RAMTotalMB    uint64  `json:"ram_total_mb"`
-	SwapUsedMB    uint64  `json:"swap_used_mb"`
-	TemperatureC  float64 `json:"temperature_c,omitempty"`
-	DiskFreeGB    uint64  `json:"disk_free_gb"`
-	Timestamp     string  `json:"timestamp"`
+	Mode             string  `json:"mode"`
+	UptimeSeconds    uint64  `json:"uptime_seconds"`
+	CPUPercent       float64 `json:"cpu_percent,omitempty"`
+	RAMUsedMB        uint64  `json:"ram_used_mb"`
+	RAMTotalMB       uint64  `json:"ram_total_mb"`
+	SwapUsedMB       uint64  `json:"swap_used_mb"`
+	TemperatureC     float64 `json:"temperature_c,omitempty"`
+	DiskFreeGB       uint64  `json:"disk_free_gb"`
+	NetworkIP        string  `json:"network_ip,omitempty"`
+	NetworkInterface string  `json:"network_interface,omitempty"`
+	Timestamp        string  `json:"timestamp"`
 }
 
 const defaultStatusTickInterval = 5 * time.Second

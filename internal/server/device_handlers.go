@@ -5,9 +5,35 @@ import (
 	"net/http"
 	"time"
 
+	"a6core/internal/auth"
 	"a6core/internal/events"
 	"a6core/internal/state"
 )
+
+// handleMe returns whatever device the request authenticated as.
+// RequireDevice has already resolved and validated it into context by
+// the time this runs, so this just reflects it back — it lets a
+// client (the phone app, in particular) learn its own is_primary
+// status without needing to separately persist its own device ID at
+// pairing time and cross-reference the full /v1/devices list.
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	device, ok := auth.DeviceFromContext(r.Context())
+	if !ok {
+		// RequireDevice guarantees a device is always present by the
+		// time a handler runs; this branch is purely defensive, same
+		// fail-honest spirit as RequirePrimary's fail-closed default.
+		writeJSONError(w, http.StatusInternalServerError, "no_device_context", "device context missing")
+		return
+	}
+	writeJSON(w, http.StatusOK, deviceResponse{
+		ID:         device.ID,
+		Name:       device.Name,
+		DeviceType: device.DeviceType,
+		IsPrimary:  device.IsPrimary,
+		PairedAt:   device.PairedAt.Format(time.RFC3339),
+		LastSeen:   device.LastSeen.Format(time.RFC3339),
+	})
+}
 
 var errLastDevice = errors.New("cannot remove the last remaining paired device")
 

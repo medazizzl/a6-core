@@ -112,3 +112,20 @@ func TestTemperatureReturnsHonestOkFlag(t *testing.T) {
 	}
 	t.Logf("Temperature() on this machine: celsius=%f ok=%v", celsius, ok)
 }
+
+func TestLocalNetworkReturnsHonestOkFlag(t *testing.T) {
+	// Same reasoning as Temperature() above: real network reachability
+	// varies by environment (a CI sandbox's egress rules are not the
+	// real Acer's real LAN), so this only asserts internal consistency
+	// -- ok=false must mean genuinely empty strings, never a fabricated
+	// address -- and logs the real result for visibility rather than
+	// hard-failing on a specific IP.
+	ip, iface, ok := LocalNetwork()
+	if !ok && (ip != "" || iface != "") {
+		t.Fatalf("when ok=false, ip and iface must both be empty, got ip=%q iface=%q", ip, iface)
+	}
+	if ok && ip == "" {
+		t.Fatal("ok=true must come with a non-empty ip")
+	}
+	t.Logf("LocalNetwork() on this machine: ip=%q iface=%q ok=%v", ip, iface, ok)
+}

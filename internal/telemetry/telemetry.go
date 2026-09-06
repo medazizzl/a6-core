@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -217,6 +218,59 @@ func UptimeSeconds() (uint64, error) {
 		return 0, fmt.Errorf("telemetry: parsing /proc/uptime: %w", err)
 	}
 	return uint64(seconds), nil
+}
+
+// LocalNetwork reports this machine's primary outbound IP address and
+// the network interface it's reachable through. Uses the same "dial
+// out, see which local address the kernel picks for the route" trick
+// this project already relies on elsewhere (the `ip route get
+// 1.1.1.1` workaround for this minimal Arch install having no
+// `hostname` command) — no packets are actually sent, a UDP "dial"
+// just resolves a route without a handshake. Returns ok=false rather
+// than a fabricated empty-string network, matching Temperature()'s
+// "don't fake a reading" discipline: on a machine with Wi-Fi and
+// Ethernet both down, there genuinely is no answer.
+func LocalNetwork() (ip string, iface string, ok bool) {
+	conn, err := net.Dial("udp", "1.1.1.1:80")
+	if err != nil {
+		return "", "", false
+	}
+	defer conn.Close()
+
+	udpAddr, isUDP := conn.LocalAddr().(*net.UDPAddr)
+	if !isUDP {
+		return "", "", false
+	}
+	ip = udpAddr.IP.String()
+
+	// Naming the interface is a nice-to-have (useful context on a
+	// machine with known Wi-Fi reliability issues, where "am I on
+	// Ethernet or Wi-Fi right now" genuinely matters) — if it can't be
+	// determined for any reason, the IP alone is still real and useful,
+	// so this degrades gracefully rather than failing the whole call.
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ip, "", true
+	}
+	for _, i := range ifaces {
+		addrs, err := i.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			var addrIP net.IP
+			switch v := a.(type) {
+			case *net.IPNet:
+				addrIP = v.IP
+			case *net.IPAddr:
+				addrIP = v.IP
+			}
+			if addrIP != nil && addrIP.String() == ip {
+				return ip, i.Name, true
+			}
+		}
+	}
+	return ip, "", true
 }
 
 const hwmonRoot = "/sys/class/hwmon"

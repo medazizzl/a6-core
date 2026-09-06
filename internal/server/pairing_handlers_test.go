@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -77,6 +78,64 @@ func TestHandlePair_SecondDeviceDoesNotBecomePrimary(t *testing.T) {
 	if devices[1].IsPrimary {
 		t.Fatal("second device should default to guest (not primary)")
 	}
+}
+
+// TestHandleMe_ReflectsOwnDeviceCorrectly proves a device can learn
+// its own is_primary status via /v1/me without needing to separately
+// store and cross-reference its own device ID against /v1/devices —
+// this is the real fix for the phone app's original gap (it never
+// stored its own device ID at pairing time).
+func TestHandleMe_ReflectsOwnDeviceCorrectly(t *testing.T) {
+	dir := t.TempDir()
+	store, err := state.Open(dir)
+	if err != nil {
+		t.Fatalf("state.Open: %v", err)
+	}
+	primaryKey, err := auth.GenerateDeviceKey()
+	if err != nil {
+		t.Fatalf("GenerateDeviceKey: %v", err)
+	}
+	guestKey, err := auth.GenerateDeviceKey()
+	if err != nil {
+		t.Fatalf("GenerateDeviceKey: %v", err)
+	}
+	err = store.Update(func(st *state.State) error {
+		st.Devices = append(st.Devices,
+			state.Device{ID: "primary-1", Name: "Primary Phone", KeyHash: auth.HashDeviceKey(primaryKey), IsPrimary: true},
+			state.Device{ID: "guest-1", Name: "Guest Phone", KeyHash: auth.HashDeviceKey(guestKey), IsPrimary: false},
+		)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("seeding devices: %v", err)
+	}
+
+	s := &Server{store: store}
+	handler := auth.RequireDevice(store, http.HandlerFunc(s.handleMe))
+
+	check := func(key string, wantID string, wantPrimary bool) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+		req.Header.Set("Authorization", "Bearer "+key)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		var got deviceResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decoding response: %v", err)
+		}
+		if got.ID != wantID {
+			t.Fatalf("expected id %q, got %q", wantID, got.ID)
+		}
+		if got.IsPrimary != wantPrimary {
+			t.Fatalf("expected is_primary=%v for %q, got %v", wantPrimary, wantID, got.IsPrimary)
+		}
+	}
+
+	check(primaryKey, "primary-1", true)
+	check(guestKey, "guest-1", false)
 }
 
 func TestDeviceTypeForRequestLoopbackIsShell(t *testing.T) {
