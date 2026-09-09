@@ -47,7 +47,7 @@ type definition struct {
 }
 
 var catalog = []definition{
-	{id: "minecraft", typ: "minecraft", name: "Survival World", port: 25565},
+	{id: "minecraft", typ: "minecraft-bedrock", name: "Survival World", port: 19132},
 }
 
 func findDefinition(id string) (definition, bool) {

@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"a6core/internal/applaunch"
 	"a6core/internal/apps"
 	"a6core/internal/config"
 	"a6core/internal/dbusctl"
@@ -74,14 +75,56 @@ func main() {
 	iconStore := icons.New(store)
 	scStore := shortcuts.New(store, iconStore)
 	retroStore := retro.New(cfg.DataDir)
-	appMgr := apps.NewManager(scStore, retroStore, nil, nil)
-	srvMgr := servers.NewManager(servers.Executor{}, 0, 0)
+
+	// Real browser/shortcut launching (this session's work): Chromium
+	// in kiosk mode, launched into whatever X session is actually live
+	// right now via internal/xsession -- no manual auth-file lookup
+	// needed, and no shell-exec of any client-influenced string.
+	// Retro/Minecraft launching are separate, unrelated to this.
+	launchExec, closeExec := applaunch.NewExecutors(scStore)
+	appMgr := apps.NewManager(scStore, retroStore, launchExec, closeExec)
 
 	// Create real system executor using dbusctl
 	dbusClient, err := dbusctl.Connect()
 	if err != nil {
 		log.Fatalf("main: failed to connect to D-Bus: %v", err)
 	}
+
+	// Stage 18: real Minecraft (Bedrock) executor, via systemd's own
+	// D-Bus API for the allowlisted minecraft-bedrock-server.service
+	// unit -- never by shelling out to `systemctl` (frozen spec §15).
+	// Broadcast is a deliberate no-op: Bedrock Dedicated Server has no
+	// RCON or remote-console equivalent to send an in-game warning
+	// through, unlike the Java/RCON server this stage's original
+	// design assumed. A real per-player warning would need the same
+	// query/console mechanism real player-count stats will use --
+	// worth adding later, not something to fake here.
+	const bedrockUnit = "minecraft-bedrock-server.service"
+	bedrockExecutor := servers.Executor{
+		Start: func(servers.Server) error {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			return dbusClient.StartUnit(ctx, bedrockUnit)
+		},
+		Stop: func(servers.Server) error {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			return dbusClient.StopUnit(ctx, bedrockUnit)
+		},
+		Broadcast: func(servers.Server, string) error {
+			return nil
+		},
+		IsStopped: func(servers.Server) (bool, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			state, err := dbusClient.UnitActiveState(ctx, bedrockUnit)
+			if err != nil {
+				return false, err
+			}
+			return state == "inactive" || state == "failed", nil
+		},
+	}
+	srvMgr := servers.NewManager(bedrockExecutor, 0, 0)
 
 	// Open the real virtual input device (Stage 17 Wave 1/5). Failure
 	// here is fatal and unretried on purpose — see inputbridge.Open's

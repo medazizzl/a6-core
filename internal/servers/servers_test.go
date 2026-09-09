@@ -34,7 +34,7 @@ func TestGetKnownServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if srv.Type != "minecraft" || srv.Port != 25565 {
+	if srv.Type != "minecraft-bedrock" || srv.Port != 19132 {
 		t.Fatalf("unexpected server: %+v", srv)
 	}
 }

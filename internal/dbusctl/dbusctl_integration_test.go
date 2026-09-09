@@ -51,3 +51,45 @@ func TestCanRebootAndCanPowerOffReportPermissionValues(t *testing.T) {
 		t.Fatalf("unexpected CanPowerOff value: %q", poweroff)
 	}
 }
+
+// TestUnitActiveStateReportsRealState is read-only, like the Can*
+// tests above -- it never calls StartUnit/StopUnit. Real start/stop
+// of minecraft-bedrock-server.service is verified manually, once,
+// deliberately, the same way Stage 15's real reboot/poweroff were --
+// not from an automated test that could fire unexpectedly against a
+// real running game server.
+func TestUnitActiveStateReportsRealState(t *testing.T) {
+	client, err := Connect()
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer client.Close()
+
+	valid := map[string]bool{"active": true, "inactive": true, "activating": true, "deactivating": true, "failed": true, "reloading": true}
+
+	state, err := client.UnitActiveState(context.Background(), "minecraft-bedrock-server.service")
+	if err != nil {
+		t.Fatalf("UnitActiveState: %v", err)
+	}
+	t.Logf("minecraft-bedrock-server.service ActiveState on this machine: %q", state)
+	if !valid[state] {
+		t.Fatalf("unexpected ActiveState value: %q", state)
+	}
+}
+
+func TestUnitActiveStateRefusesNonAllowlistedUnit(t *testing.T) {
+	client, err := Connect()
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer client.Close()
+
+	// sshd.service definitely exists on this machine (it's how we're
+	// running this test at all) -- proving THIS specific real unit is
+	// refused, not just a nonexistent one, is what actually confirms
+	// the allowlist check runs before any real D-Bus call is made.
+	_, err = client.UnitActiveState(context.Background(), "sshd.service")
+	if err == nil {
+		t.Fatal("expected an error querying a non-allowlisted unit, got nil")
+	}
+}
