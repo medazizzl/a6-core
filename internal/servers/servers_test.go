@@ -49,7 +49,7 @@ func TestBlockingEmptyWhenNothingRunning(t *testing.T) {
 func TestBlockingReflectsRunningWithPlayers(t *testing.T) {
 	m := NewManager(Executor{}, 0, 0)
 	m.setStatus("minecraft", StatusRunning)
-	m.setPlayers("minecraft", &Players{Current: 3, Max: 10})
+	m.SetPlayers("minecraft", &Players{Current: 3, Max: 10})
 
 	b := m.Blocking()
 	if len(b) != 1 || b[0].Type != "server" || b[0].ID != "minecraft" || b[0].Players != 3 {
@@ -60,7 +60,7 @@ func TestBlockingReflectsRunningWithPlayers(t *testing.T) {
 func TestBlockingIgnoresRunningWithZeroPlayers(t *testing.T) {
 	m := NewManager(Executor{}, 0, 0)
 	m.setStatus("minecraft", StatusRunning)
-	m.setPlayers("minecraft", &Players{Current: 0})
+	m.SetPlayers("minecraft", &Players{Current: 0})
 
 	if b := m.Blocking(); b != nil {
 		t.Fatalf("expected no blocking resources with zero players, got %v", b)

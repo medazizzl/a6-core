@@ -148,3 +148,21 @@ func (s *Store) GameExists(console, gameID string) (bool, error) {
 	}
 	return false, nil
 }
+
+// GamePath returns the real, absolute filesystem path to a game —
+// but only after confirming it exists via the same byte-for-byte
+// scan GameExists uses. game_id is never joined into a path until
+// AFTER that confirmation, so a traversal-shaped id can't reach this
+// point at all; it simply never matches a real scanned filename.
+// This is what internal/applaunch needs to actually start a real
+// emulator process — GameExists alone only gives a yes/no.
+func (s *Store) GamePath(console, gameID string) (string, error) {
+	ok, err := s.GameExists(console, gameID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("retro: game %q not found for console %q", gameID, console)
+	}
+	return filepath.Join(s.romDir(console), gameID), nil
+}

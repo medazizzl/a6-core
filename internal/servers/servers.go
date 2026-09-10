@@ -185,7 +185,12 @@ func (m *Manager) setStatus(id string, status Status) {
 	}
 }
 
-func (m *Manager) setPlayers(id string, players *Players) {
+// SetPlayers updates the live player count for a server. Called by
+// the real Bedrock poller in main.go, which is the only thing that
+// should ever call this — it's how genuinely-measured player counts
+// (from a real RakNet ping, see internal/bedrockping) get into the
+// Server responses, never a value anyone just makes up.
+func (m *Manager) SetPlayers(id string, players *Players) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if rt, ok := m.runtime[id]; ok {
