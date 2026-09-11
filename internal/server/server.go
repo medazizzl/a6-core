@@ -59,7 +59,10 @@ func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system
 
 	sh := &systemHandler{sysMgr: sysMgr}
 	mux.Handle("GET /v1/system/info", auth.RequireDevice(store, http.HandlerFunc(sh.handleInfo)))
-	mux.Handle("/v1/system/reboot", auth.RequireDevice(store, auth.RequirePrimary(http.HandlerFunc(sh.handleReboot))))
+	// Reboot is deliberately open to any paired device, not just
+	// primary — a real product decision (see DECISIONS.md), not the
+	// original Stage 16 design. Shutdown stays primary-only.
+	mux.Handle("/v1/system/reboot", auth.RequireDevice(store, http.HandlerFunc(sh.handleReboot)))
 	mux.Handle("/v1/system/shutdown", auth.RequireDevice(store, auth.RequirePrimary(http.HandlerFunc(sh.handleShutdown))))
 
 	scH := &shortcutHandler{store: scStore}

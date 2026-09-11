@@ -215,3 +215,96 @@ Environment notes:
 - github.com/coder/websocket v1.8.15 added to go.mod (first
  non-stdlib runtime dep).
 - gcc remains build-time only (for -race).
+
+## Stage 16 — actually implemented (previously design-only)
+
+Stage 16 had existed only as a design document for a while — a `grep -rn
+IsPrimary` on the real repo turned up nothing at all. Implemented for real:
+`Device.IsPrimary`, migration for pre-Stage-16 state.json (auto-promotes the
+earliest-paired device if none is marked primary), first-ever-paired device
+becomes primary automatically, `RequirePrimary` middleware, `POST
+/v1/devices/{id}/promote` (additive only, no demotion mechanism — same
+"last device" lockout risk as Stage 7, deferred as its own design pass).
+All 8 real verification criteria (migration, first-pair, primary can act,
+guest rejected, guest unaffected elsewhere, a raw manual request from a
+guest is rejected server-side, survives restart, zero regressions) proven
+with real `-race -count=10` runs against the actual Acer, plus one live
+guest-rejection test against the real running server.
+
+Also discovered live: the real GitHub repo was missing `internal/dbusctl`
+entirely (referenced by main.go, never actually committed despite the
+Stage 15 commit message claiming otherwise) and was several stages behind
+the Acer's real local code. Real catch-up commit pushed before any of the
+above was built, so Stage 16 was built against actual current code, not a
+stale snapshot.
+
+## Stage 18 — Real Minecraft executor (Bedrock, not Java)
+
+Switched from Java/PaperMC to **Bedrock Dedicated Server** partway through
+implementation — Paper was fully installed and manually proven working
+first, then abandoned once it turned out Bedrock was what was actually
+wanted. Installed via the `minecraft-bedrock-server` AUR package (verified
+as real and actively maintained before use, not just trusted from an AI's
+suggestion) rather than a hand-rolled install script, since it comes with
+a proper systemd unit and dedicated service user out of the box.
+
+Real executor wiring: `internal/dbusctl` extended with a narrow, allowlisted
+systemd unit manager (`StartUnit`/`StopUnit`/`UnitActiveState` for
+`minecraft-bedrock-server.service` only, not general unit control) — never
+shells out to `systemctl`, per the standing "no arbitrary shell exec" rule.
+
+Real incident: after wiring this up, real Start/Stop calls failed with
+"Permission denied" despite a correct, narrowly-scoped polkit rule. Root
+cause was in the *existing* `49-a6core.rules` (Stage 15), which ended with
+an unconditional `return polkit.Result.NO` for anything outside its own
+three actions — since polkit rule files are evaluated in order and the
+first definitive answer wins, this silently blocked every later rule file
+from ever being reached, for months, without anyone noticing until a
+second rule file actually needed to run. Fixed by returning nothing
+(not NO) for out-of-scope actions. Worth remembering: a "deny by default"
+rule that returns an explicit NO instead of staying silent will block
+every rule file loaded after it, not just requests it's actually meant to
+gate.
+
+Also found and fixed live: `NewManager` always initializes every server's
+in-memory status to `StatusStopped`, with no reconciliation against
+reality. After several a6core restarts during this stage's deployment, the
+real Bedrock service had been running for 14+ hours while the app kept
+reporting "stopped." Fixed with `SyncInitialStatus`, called once at
+startup via a real `UnitActiveState` query — deliberately not a general
+sync mechanism, ordinary transitions still go through Start/Stop only.
+
+Real player-count stats: Bedrock has no RCON and no GameSpy4/UT3 query
+protocol (Java's `enable-query` has no Bedrock equivalent at all — verified
+against the actual protocol docs, not assumed). The only real status
+mechanism Bedrock implements is the same RakNet Unconnected Ping/Pong every
+Bedrock client sends to populate its own server list. `internal/bedrockping`
+implements this for real (verified byte layout, tested against a real fake
+UDP server, not just unit-tested against a hardcoded byte slice) and a
+10s background poller in main.go keeps `Players` current — failures clear
+it back to `nil` rather than showing a stale or fabricated count.
+
+## Reboot/Shutdown permission redesign (post-Stage-16)
+
+Stage 16's original design gated both `/v1/system/reboot` and
+`/v1/system/shutdown` to primary devices. Deliberately changed:
+**Reboot is now open to any paired device** (guest included); **Shutdown
+remains primary-only**. Real product decision, not a bug — a guest
+rebooting the appliance is low-stakes and occasionally useful; a guest
+shutting it down fully is not.
+
+A "fake Shutdown for guests that's actually a screen-sleep action" was
+proposed and explicitly NOT built. Reasoning worth preserving: there is no
+real shell/display layer yet to react to a sleep request, and real OS
+suspend was already ruled out on this hardware (Stage 15 — left the
+machine unreachable for 90+ minutes in testing). Building a button that
+appears to do something while doing nothing visible was rejected outright,
+and building event-publishing infrastructure with no real consumer yet was
+also rejected — "define now if useful, implement when there's a real
+consumer." The likely future contract, NOT implemented: a
+`system.sleep_requested` event published via the existing Hub (same
+pattern as `server.status_changed`), consumed by the shell once it exists,
+which owns real display blanking per the original Stage 17 design (HDMI
+auto-blanking is shell-owned, not a separate systemd/udev service). Define
+the real behavior (screen blank vs. shell-level sleep vs. something else)
+together with the shell, not in advance of it.
