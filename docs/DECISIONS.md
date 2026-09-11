@@ -294,17 +294,21 @@ rebooting the appliance is low-stakes and occasionally useful; a guest
 shutting it down fully is not.
 
 A "fake Shutdown for guests that's actually a screen-sleep action" was
-proposed and explicitly NOT built. Reasoning worth preserving: there is no
-real shell/display layer yet to react to a sleep request, and real OS
-suspend was already ruled out on this hardware (Stage 15 — left the
-machine unreachable for 90+ minutes in testing). Building a button that
-appears to do something while doing nothing visible was rejected outright,
-and building event-publishing infrastructure with no real consumer yet was
-also rejected — "define now if useful, implement when there's a real
-consumer." The likely future contract, NOT implemented: a
-`system.sleep_requested` event published via the existing Hub (same
-pattern as `server.status_changed`), consumed by the shell once it exists,
-which owns real display blanking per the original Stage 17 design (HDMI
-auto-blanking is shell-owned, not a separate systemd/udev service). Define
-the real behavior (screen blank vs. shell-level sleep vs. something else)
-together with the shell, not in advance of it.
+proposed and initially NOT built, for real reasons worth preserving: there
+was no real shell/display layer to react to a sleep request, and real OS
+suspend was already ruled out on this hardware (Stage 15 — left the machine
+unreachable for 90+ minutes in testing). Building a button that appears to
+do something while doing nothing visible was rejected outright.
+
+Revisited shortly after and split cleanly: the **backend contract is now
+real** — `POST /v1/display/sleep` (open to any paired device, including
+guests) publishes a `display.sleep_requested` event and touches no
+hardware at all, costing essentially nothing to add. The **phone app's UI
+button is deliberately NOT exposed yet** — tapping it right now would still
+produce no visible effect, since nothing consumes this event until the TV
+shell exists and starts listening for it (display blanking is shell-owned,
+per the original Stage 17 design — HDMI auto-blanking was never meant to
+be a separate systemd/udev service). When the shell adds that listener,
+this endpoint needs no further backend changes — only the phone app needs
+to add the button. Real shutdown (`/v1/system/shutdown`) remains
+primary-only and unchanged; a guest can never reach it.

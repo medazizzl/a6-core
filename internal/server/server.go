@@ -86,6 +86,10 @@ func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system
 	mux.Handle("GET /v1/retro/games", auth.RequireDevice(store, http.HandlerFunc(rtH.handleGames)))
 	mux.Handle("POST /v1/retro/launch", auth.RequireDevice(store, http.HandlerFunc(rtH.handleLaunch)))
 
+	// Real, minimal, guest-accessible -- see DECISIONS.md. Publishes
+	// an event only; no phone-app UI calls this yet.
+	mux.Handle("POST /v1/display/sleep", auth.RequireDevice(store, http.HandlerFunc(s.handleDisplaySleep)))
+
 	srvH := &serverHandler{mgr: srvMgr}
 	mux.Handle("GET /v1/servers", auth.RequireDevice(store, http.HandlerFunc(srvH.handleList)))
 	mux.Handle("GET /v1/servers/{id}", auth.RequireDevice(store, http.HandlerFunc(srvH.handleGet)))
