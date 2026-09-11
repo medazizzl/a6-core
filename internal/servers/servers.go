@@ -185,6 +185,26 @@ func (m *Manager) setStatus(id string, status Status) {
 	}
 }
 
+// SyncInitialStatus sets a server's initial runtime status directly,
+// bypassing Start/Stop's transition logic entirely. This exists for
+// exactly one purpose: reconciling in-memory state with reality
+// immediately after the Manager is constructed, since NewManager
+// always initializes every server to StatusStopped regardless of
+// whether the real process/unit was already running from before
+// a6core itself last restarted (a real gap discovered live: after
+// several a6core restarts during Stage 18 deployment, the real
+// Bedrock server had been running for 14+ hours while the app kept
+// reporting "stopped"). Never call this after startup — ordinary
+// state changes must go through Start/Stop so the full lifecycle
+// (grace periods, events, player tracking) stays correct.
+func (m *Manager) SyncInitialStatus(id string, status Status) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if rt, ok := m.runtime[id]; ok {
+		rt.status = status
+	}
+}
+
 // SetPlayers updates the live player count for a server. Called by
 // the real Bedrock poller in main.go, which is the only thing that
 // should ever call this — it's how genuinely-measured player counts

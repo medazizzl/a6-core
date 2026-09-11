@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"a6core/internal/applaunch"
 	"a6core/internal/apps"
+	"a6core/internal/bedrockping"
 	"a6core/internal/config"
 	"a6core/internal/dbusctl"
 	"a6core/internal/events"
@@ -49,6 +49,42 @@ func (e *realExecutor) PowerOff(ctx context.Context) error {
 	return nil
 }
 
+// runBedrockPlayerPoller keeps the Minecraft server's live player
+// count current by really pinging it over RakNet every 10s (see
+// internal/bedrockping) — not by inferring anything from process
+// state. A running process could still be mid-world-load or hung, so
+// "the process exists" and "it's actually answering with a real
+// player count" are deliberately checked separately, the same way
+// telemetry.Temperature() only reports a real sensor reading or
+// nothing at all. A failed ping clears the count back to nil rather
+// than leaving a stale number on screen.
+func runBedrockPlayerPoller(ctx context.Context, srvMgr *servers.Manager) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			srv, err := srvMgr.Get("minecraft")
+			if err != nil || srv.Port == 0 {
+				continue
+			}
+			addr := fmt.Sprintf("127.0.0.1:%d", srv.Port)
+			status, err := bedrockping.Ping(addr, 2*time.Second)
+			if err != nil {
+				log.Printf("bedrockping: WARNING ping to %s failed: %v", addr, err)
+				srvMgr.SetPlayers("minecraft", nil)
+				continue
+			}
+			srvMgr.SetPlayers("minecraft", &servers.Players{
+				Current: status.Players,
+				Max:     status.MaxPlayers,
+			})
+		}
+	}
+}
+
 func main() {
 	versionFlag := flag.Bool("version", false, "print version and exit")
 	configPath := flag.String("config", "", "path to a JSON config file (optional; defaults are used if omitted)")
@@ -75,15 +111,7 @@ func main() {
 	iconStore := icons.New(store)
 	scStore := shortcuts.New(store, iconStore)
 	retroStore := retro.New(cfg.DataDir)
-
-	// Real browser/shortcut/retro launching: Chromium or a real
-	// console emulator (NES only so far -- see applaunch's
-	// consoleEmulator map), launched into whatever X session is
-	// actually live right now via internal/xsession -- no manual
-	// auth-file lookup needed, and no shell-exec of any
-	// client-influenced string.
-	launchExec, closeExec := applaunch.NewExecutors(scStore, retroStore)
-	appMgr := apps.NewManager(scStore, retroStore, launchExec, closeExec)
+	appMgr := apps.NewManager(scStore, retroStore, nil, nil)
 
 	// Create real system executor using dbusctl
 	dbusClient, err := dbusctl.Connect()
@@ -126,6 +154,21 @@ func main() {
 		},
 	}
 	srvMgr := servers.NewManager(bedrockExecutor, 0, 0)
+
+	// Real fix for a real bug found live: NewManager always
+	// initializes every server to StatusStopped, but the actual
+	// Bedrock process/unit can genuinely still be running from before
+	// a6core itself last restarted (confirmed: 14+ hours of real
+	// uptime while the app kept showing "stopped" after a deployment
+	// restart). One real D-Bus query at startup, then never again —
+	// every subsequent transition still goes through the normal
+	// Start/Stop lifecycle.
+	if state, err := dbusClient.UnitActiveState(context.Background(), bedrockUnit); err != nil {
+		log.Printf("main: WARNING could not sync initial Minecraft status: %v", err)
+	} else if state == "active" {
+		srvMgr.SyncInitialStatus("minecraft", servers.StatusRunning)
+		log.Println("main: minecraft-bedrock-server was already running at startup, synced in-memory status")
+	}
 
 	// Open the real virtual input device (Stage 17 Wave 1/5). Failure
 	// here is fatal and unretried on purpose — see inputbridge.Open's
@@ -207,7 +250,7 @@ func main() {
 	srv := server.New("7887", store, modeMgr, sysMgr, scStore, iconStore, appMgr, retroStore, srvMgr, hub, inputMgr)
 
 	// bgCtx governs every background goroutine started below — all
-	// three are cancelled together, at the same moment the HTTP
+	// four are cancelled together, at the same moment the HTTP
 	// server begins its own graceful shutdown, so nothing outlives
 	// the server and nothing gets cut off before it.
 	bgCtx, cancelBg := context.WithCancel(context.Background())
@@ -216,6 +259,7 @@ func main() {
 	go sampler.Run(bgCtx)
 	go hub.Run(bgCtx)
 	go hub.RunStatusTicks(bgCtx, statusProvider, 0) // 0 -> real 5s spec default
+	go runBedrockPlayerPoller(bgCtx, srvMgr)
 
 	serverErr := make(chan error, 1)
 	go func() {
