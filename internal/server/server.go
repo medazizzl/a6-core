@@ -10,6 +10,7 @@ import (
 
 	"a6core/internal/apps"
 	"a6core/internal/auth"
+	"a6core/internal/cloud"
 	"a6core/internal/events"
 	"a6core/internal/icons"
 	"a6core/internal/input"
@@ -27,14 +28,16 @@ type Server struct {
 	pairing    *auth.PairingManager
 	rateLimit  *auth.RateLimiter
 	hub        *events.Hub
+	cloud      *cloud.Store
 }
 
-func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system.Manager, scStore *shortcuts.Store, iconStore *icons.Store, appMgr *apps.Manager, retroStore *retro.Store, srvMgr *servers.Manager, hub *events.Hub, inputMgr *input.Manager) *Server {
+func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system.Manager, scStore *shortcuts.Store, iconStore *icons.Store, appMgr *apps.Manager, retroStore *retro.Store, srvMgr *servers.Manager, hub *events.Hub, inputMgr *input.Manager, cloudStore *cloud.Store) *Server {
 	s := &Server{
 		store:     store,
 		pairing:   auth.NewPairingManager(),
 		rateLimit: auth.NewRateLimiter(),
 		hub:       hub,
+		cloud:     cloudStore,
 	}
 
 	mux := http.NewServeMux()
@@ -89,6 +92,21 @@ func New(port string, store *state.Store, modeMgr *modes.Manager, sysMgr *system
 	// Real, minimal, guest-accessible -- see DECISIONS.md. Publishes
 	// an event only; no phone-app UI calls this yet.
 	mux.Handle("POST /v1/display/sleep", auth.RequireDevice(store, http.HandlerFunc(s.handleDisplaySleep)))
+
+	// Cloud storage: a completely separate account/session system
+	// from device pairing (see DECISIONS.md). Register/Login require
+	// an already-paired A6 device -- being on the WiFi isn't enough,
+	// matching the trust boundary everything else in this app uses.
+	// Every other cloud route requires a valid cloud session instead.
+	cloudH := &cloudHandler{cloud: s.cloud}
+	mux.Handle("POST /v1/cloud/register", auth.RequireDevice(store, http.HandlerFunc(cloudH.handleRegister)))
+	mux.Handle("POST /v1/cloud/login", auth.RequireDevice(store, http.HandlerFunc(cloudH.handleLogin)))
+	mux.Handle("POST /v1/cloud/logout", auth.RequireCloudSession(s.cloud, http.HandlerFunc(cloudH.handleLogout)))
+	mux.Handle("GET /v1/cloud/me", auth.RequireCloudSession(s.cloud, http.HandlerFunc(cloudH.handleMe)))
+	mux.Handle("POST /v1/cloud/upload", auth.RequireCloudSession(s.cloud, http.HandlerFunc(cloudH.handleUpload)))
+	mux.Handle("GET /v1/cloud/files", auth.RequireCloudSession(s.cloud, http.HandlerFunc(cloudH.handleListFiles)))
+	mux.Handle("GET /v1/cloud/files/{id}", auth.RequireCloudSession(s.cloud, http.HandlerFunc(cloudH.handleGetFile)))
+	mux.Handle("DELETE /v1/cloud/files/{id}", auth.RequireCloudSession(s.cloud, http.HandlerFunc(cloudH.handleDeleteFile)))
 
 	srvH := &serverHandler{mgr: srvMgr}
 	mux.Handle("GET /v1/servers", auth.RequireDevice(store, http.HandlerFunc(srvH.handleList)))

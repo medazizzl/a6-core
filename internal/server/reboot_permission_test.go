@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"a6core/internal/apps"
+	"a6core/internal/cloud"
 	"a6core/internal/events"
 	"a6core/internal/icons"
 	"a6core/internal/input"
@@ -64,8 +65,9 @@ func newFullTestServer(t *testing.T) (*Server, *fakeSystemExecutor) {
 	srvMgr := servers.NewManager(servers.Executor{}, 0, 0) // falls back to NoOpExecutor
 	hub := events.NewHub()
 	inputMgr := input.NewManager(nil)
+	cloudStore := cloud.New(store, t.TempDir())
 
-	srv := New("0", store, modeMgr, sysMgr, scStore, iconStore, appMgr, retroStore, srvMgr, hub, inputMgr)
+	srv := New("0", store, modeMgr, sysMgr, scStore, iconStore, appMgr, retroStore, srvMgr, hub, inputMgr, cloudStore)
 	return srv, fakeExec
 }
 

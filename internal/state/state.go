@@ -35,13 +35,16 @@ const (
 )
 
 type State struct {
-	CoreID    string     `json:"core_id"`
-	CoreName  string     `json:"core_name"`
-	Mode      string     `json:"mode"`
-	Devices   []Device   `json:"devices"`
-	Shortcuts []Shortcut `json:"shortcuts"`
-	Servers   []Server   `json:"servers"`
-	Settings  Settings   `json:"settings"`
+	CoreID        string         `json:"core_id"`
+	CoreName      string         `json:"core_name"`
+	Mode          string         `json:"mode"`
+	Devices       []Device       `json:"devices"`
+	Shortcuts     []Shortcut     `json:"shortcuts"`
+	Servers       []Server       `json:"servers"`
+	CloudUsers    []CloudUser    `json:"cloud_users"`
+	CloudSessions []CloudSession `json:"cloud_sessions"`
+	CloudFiles    []CloudFile    `json:"cloud_files"`
+	Settings      Settings       `json:"settings"`
 }
 
 type Device struct {
@@ -66,6 +69,53 @@ type Server struct {
 	Type   string         `json:"type"`
 	Name   string         `json:"name"`
 	Config map[string]any `json:"config,omitempty"`
+}
+
+// CloudUser is a real, separate account system from device pairing —
+// a username/password login for the personal photo/video/file
+// storage feature. Deliberately independent: a phone can be a paired
+// A6 device (or not) and STILL need its own cloud login, same as any
+// normal multi-user app.
+type CloudUser struct {
+	ID           string    `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"password_hash"` // bcrypt, NOT the SHA-256 scheme device keys use -- see auth package notes on why
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// CloudSession is a real, revocable login session -- storing only
+// the session's hash (never the raw token), same discipline as
+// Device.KeyHash. Having a real, deletable session record (not just
+// a stateless signed token) is what makes a real Logout button
+// possible: revoking a session here means that token can never be
+// used again, even if a copy of it still exists somewhere.
+type CloudSession struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	TokenHash string    `json:"token_hash"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+const (
+	CloudCategoryPhoto = "photo"
+	CloudCategoryVideo = "video"
+	CloudCategoryOther = "other"
+)
+
+// CloudFile is one uploaded file's metadata. The real file bytes
+// live on disk at <data_dir>/cloud/<owner_id>/<category>/<stored_name>
+// -- StoredName is a generated, collision-proof name, deliberately
+// NOT the user's original Filename (which could contain path
+// separators, be non-unique, or collide across users).
+type CloudFile struct {
+	ID         string    `json:"id"`
+	OwnerID    string    `json:"owner_id"`
+	Category   string    `json:"category"` // one of the CloudCategory* constants above
+	Filename   string    `json:"filename"`
+	StoredName string    `json:"stored_name"`
+	SizeBytes  int64     `json:"size_bytes"`
+	MimeType   string    `json:"mime_type"`
+	UploadedAt time.Time `json:"uploaded_at"`
 }
 
 type Settings struct {

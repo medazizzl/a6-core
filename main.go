@@ -12,6 +12,7 @@ import (
 
 	"a6core/internal/apps"
 	"a6core/internal/bedrockping"
+	"a6core/internal/cloud"
 	"a6core/internal/config"
 	"a6core/internal/dbusctl"
 	"a6core/internal/events"
@@ -247,7 +248,9 @@ func main() {
 		return tick
 	}
 
-	srv := server.New("7887", store, modeMgr, sysMgr, scStore, iconStore, appMgr, retroStore, srvMgr, hub, inputMgr)
+	cloudStore := cloud.New(store, cfg.DataDir)
+
+	srv := server.New("7887", store, modeMgr, sysMgr, scStore, iconStore, appMgr, retroStore, srvMgr, hub, inputMgr, cloudStore)
 
 	// bgCtx governs every background goroutine started below — all
 	// four are cancelled together, at the same moment the HTTP
